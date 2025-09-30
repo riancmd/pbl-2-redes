@@ -26,7 +26,8 @@ var (
 )
 
 func main() {
-	//blaa bla bla client normal
+	//blaa bla bla client normal faz conexão tcp
+
 	// fico verificando o que o servidor manda
 	go handleServerMessages()
 }
@@ -64,7 +65,7 @@ func subscribe(topic string) error {
 }
 
 // manda o tópico e vc se desinscreve dele
-func Unixsubscribe(topic string) error {
+func unsubscribe(topic string) error {
 	msg := Msg{
 		Topic: topic,
 		Event: "unsubscribe",
