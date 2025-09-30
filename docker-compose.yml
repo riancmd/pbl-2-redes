@@ -1,0 +1,38 @@
+version: "3.8"
+
+services:
+  #serviço do server
+  server:
+    build:
+      context: ./server
+    container_name: server
+    ports:
+      - "8080:8080" # tcp pro jogo normal
+      - "8081:8081/udp" # a udp que é apenas pra latência
+    networks:
+      - go-net
+
+  # serviço do cliente 
+  client:
+    build:
+      context: ./client
+    container_name: client
+    depends_on:
+      - server
+    networks:
+      - go-net
+    stdin_open: true # nao tirar (input funfa)
+    tty: true    
+
+  # serviço dos bots  
+  bots:
+    build:
+      context: .
+    container_name: bots
+    depends_on:
+      - server
+    networks:
+      - go-net
+    
+networks:
+  go-net:
