@@ -1,4 +1,4 @@
-package main
+package types
 
 import (
 	"encoding/json"
@@ -7,6 +7,31 @@ import (
 	"sync"
 	"time"
 )
+
+// Struct de carta temporária para meta
+type CardTest struct {
+	ID       string `json:"id"` //Por enquanto ID do dono
+	Nomes    string `json:"nome"`
+	Poder    int    `json:"poder"`
+	Raridade string `json:"raridade"`
+}
+
+// Variáveis do server que precisam de sincronização
+type SyncVar struct {
+	Mu             sync.Mutex
+	packageCounter int
+}
+
+// Dados de uma transação de compra
+type PurchasePayload struct {
+	TransactionID string `json:"transactionId"`
+	ClientID      string `json:"clientId"`
+}
+
+// Requisição de compra do cliente
+type ClientPurchaseRequest struct {
+	ClientID string `json:"clientId"`
+}
 
 // mensagem padrão para conversa cliente-servidor
 type Message struct {
