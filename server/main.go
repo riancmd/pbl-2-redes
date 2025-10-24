@@ -78,8 +78,7 @@ func main() {
 	}
 }
 
-// cria conexão udp com porta 8081 QUANDO solicitado pelo usuário (e nn automaticamente)
-// por isso ela fecha com o defer assim que acaba a função
+// cria conexão udp com porta 8081 p pings
 func handlerPing() {
 	address, _ := net.ResolveUDPAddr("udp", ":8081") // cria conexão pela porta 8081
 	connection, _ := net.ListenUDP("udp", address)

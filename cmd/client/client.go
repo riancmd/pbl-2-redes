@@ -1,4 +1,3 @@
-// Arquivo: client.go
 package main
 
 import (
