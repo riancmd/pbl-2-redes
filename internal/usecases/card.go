@@ -43,5 +43,5 @@ func (u UseCases) RemoveBooster(BID int) error {
 }
 
 func (u UseCases) AddCardsFromFile(filename string) error {
-
+	u.utils.CardDB.InitializeCardsFromJSON()
 }

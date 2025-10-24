@@ -2,6 +2,9 @@ package repositories
 
 import (
 	"pbl-2-redes/internal/models"
+	"pbl-2-redes/internal/repositories/cards"
+	"pbl-2-redes/internal/repositories/matches"
+	"pbl-2-redes/internal/repositories/queue"
 	"pbl-2-redes/internal/repositories/users"
 
 	"github.com/google/uuid"
@@ -36,6 +39,9 @@ type Repositories struct {
 
 func New() *Repositories {
 	return &Repositories{
-		User: users.New(),
+		User:  users.New(),
+		Card:  cards.New(),
+		Match: matches.New(),
+		Queue: queue.New(),
 	}
 }
