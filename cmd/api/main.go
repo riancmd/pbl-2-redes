@@ -12,7 +12,7 @@ func main() {
 	repos := repositories.New()
 	useCases := usecases.New(repos)
 
-	err := useCases.AddCardsFromFile("././data/cardVault.json", 100000)
+	err := useCases.AddCardsFromFile("../../internal/data/cardVault.json", 100000)
 
 	if err != nil {
 		panic(err)
