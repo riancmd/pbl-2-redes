@@ -8,9 +8,9 @@ import (
 	"time"
 )
 
-func (u UseCases) GetAllCards() []models.User {
-	users := u.repos.User.GetAll()
-	return users
+func (u UseCases) GetAllCards() []models.Booster {
+	cards := u.repos.Card.GetAll()
+	return cards
 }
 
 func (u UseCases) AddCards(newBooster models.Booster) error {

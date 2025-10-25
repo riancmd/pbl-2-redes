@@ -204,7 +204,7 @@ func (cd CardDB) CreateBoosters(cardPool []models.Card, boostersCount int) ([]mo
 	Generator.Shuffle(len(cardPool), func(i, j int) {
 		cardPool[i], cardPool[j] = cardPool[j], cardPool[i]
 	})
-	println("\n Iniciando criação dos boosters...")
+
 	// crio os boosters individualmente
 	for i := 0; i < boostersCount; i++ {
 		booster := models.Booster{

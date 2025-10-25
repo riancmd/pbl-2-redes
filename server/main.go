@@ -16,6 +16,27 @@ var (
 )
 
 func main() {
+	// COMUNICAÇÃO HTTP DEOPIS DO GET
+	/*
+		for {
+			if port != 7777 {
+				res, err := http.Get("http://localhost:7777/cards")
+
+				if err != nil {
+					panic(err)
+				}
+
+				body, err := ioutil.ReadAll(res.Body)
+				if err != nil {
+					log.Fatalf("Error reading response body: %v", err)
+				}
+
+				log.Printf("Response Body: %s", string(body))
+
+			}
+		}
+	*/
+
 	// cria vault e mm
 	vault = NewCardVault()
 	mm = NewMatchManager()
