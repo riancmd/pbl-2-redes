@@ -31,7 +31,7 @@ type Repositories struct {
 	}
 	Queue interface {
 		GetAll() []uuid.UUID
-		Enqueue(UID uuid.UUID) error
+		Enqueue(UID uuid.UUID)
 		Dequeue() error
 		UserEnqueued(uuid.UUID) bool
 	}

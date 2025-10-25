@@ -8,10 +8,10 @@ import (
 type Utils struct {
 	CardDB interface {
 		InitializeCardsFromJSON(filename string) (map[string]models.Card, error)
-		LoadCardsFromFile(filename string) error
-		CalculateCardCopies(boostersCount int) map[string]int
-		CreateCardPool(copies map[string]int) []models.Card
-		CreateBoosters(boostersCount int) error
+		LoadCardsFromFile(filename string) (map[string]models.Card, error)
+		CalculateCardCopies(glossary map[string]models.Card, boostersCount int) map[string]int
+		CreateCardPool(glossary map[string]models.Card, copies map[string]int) []models.Card
+		CreateBoosters(cardPool []models.Card, boostersCount int) ([]models.Booster, error)
 	}
 }
 

@@ -51,7 +51,7 @@ func (cd CardDB) LoadCardsFromFile(filename string) (map[string]models.Card, err
 // calcula quantidade de cópias de cada carta
 // coloco a quantidade de boosters que quero
 // retorno: map com quantas de cada carta
-func (cd CardDB) calculateCardCopies(glossary map[string]models.Card, boostersCount int) map[string]int {
+func (cd CardDB) CalculateCardCopies(glossary map[string]models.Card, boostersCount int) map[string]int {
 	// conta cartas por tipo
 	remCards := []string{}
 	nremCards := []string{}
@@ -178,7 +178,7 @@ func (cd CardDB) calculateCardCopies(glossary map[string]models.Card, boostersCo
 
 // crio um "pool" de cartas baseado nas cópias calculadas
 // esse bolo de cartas é utilizado na hora de criar os boosters
-func (cd CardDB) createCardPool(glossary map[string]models.Card, copies map[string]int) []models.Card {
+func (cd CardDB) CreateCardPool(glossary map[string]models.Card, copies map[string]int) []models.Card {
 	var pool []models.Card
 
 	for cid, quantity := range copies {
@@ -195,20 +195,20 @@ func (cd CardDB) createCardPool(glossary map[string]models.Card, copies map[stri
 // a partir de um cardPool de forma aleatória
 // cardPool: tem todas as unidades de cartas geradas já com raridade sortida
 // boostersCount: quantidade de boosters a serem criados
-func (cd CardDB) createBoosters(cardPool []models.Card, boostersCount int) ([]models.Booster, error) {
+func (cd CardDB) CreateBoosters(cardPool []models.Card, boostersCount int) ([]models.Booster, error) {
 	// a estrutura vault guarda todos os boosters
-	vault := []models.Booster{}
+	vault := make([]models.Booster, 0)
 	Generator := rand.New(rand.NewSource(time.Now().UnixNano())) // gerador
 
 	// embaralho o pool com o generator
 	Generator.Shuffle(len(cardPool), func(i, j int) {
 		cardPool[i], cardPool[j] = cardPool[j], cardPool[i]
 	})
-
+	println("\n Iniciando criação dos boosters...")
 	// crio os boosters individualmente
 	for i := 0; i < boostersCount; i++ {
 		booster := models.Booster{
-			BID:     i + 1,
+			BID:     i,
 			Booster: make([]models.Card, 0, CARDS_PER_BOOSTER),
 		}
 
@@ -226,8 +226,7 @@ func (cd CardDB) createBoosters(cardPool []models.Card, boostersCount int) ([]mo
 			booster.Booster = append(booster.Booster, cardPool[j])
 		}
 
-		vault[i+1] = booster
+		vault = append(vault, booster)
 	}
-
 	return vault, nil
 }
