@@ -20,6 +20,7 @@ type User struct {
 }
 
 type CreateUserRequest struct {
+	UID      uuid.UUID
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
