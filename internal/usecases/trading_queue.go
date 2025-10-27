@@ -8,26 +8,26 @@ import (
 	"github.com/google/uuid"
 )
 
-func (u UseCases) GetAllEnqueuedPlayers() []uuid.UUID {
-	queue := u.repos.Queue.GetAll()
+func (u UseCases) Trading_GetAllEnqueuedPlayers() []uuid.UUID {
+	queue := u.repos.BattleQueue.GetAll()
 	return queue
 }
 
-func (u UseCases) Enqueue(user models.User) error {
-	enqueued := u.repos.Queue.UserEnqueued(user.UID)
+func (u UseCases) Trading_Enqueue(user models.User) error {
+	enqueued := u.repos.BattleQueue.UserEnqueued(user.UID)
 
 	if enqueued {
 		slog.Error("this user is already enqueued", "username", user.Username)
 		return errors.New("user is already enqueued")
 	}
 
-	u.repos.Queue.Enqueue(user.UID)
+	u.repos.BattleQueue.Enqueue(user.UID)
 
 	return nil
 }
 
-func (u UseCases) Dequeue() error {
-	empty := u.repos.Queue.Dequeue()
+func (u UseCases) Trading_Dequeue() error {
+	empty := u.repos.BattleQueue.Dequeue()
 
 	if empty != nil {
 		slog.Error("queue is already empty")

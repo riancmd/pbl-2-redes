@@ -28,8 +28,17 @@ type Repositories struct {
 		GetAll() []models.Match
 		Add(newMatch models.Match)
 		MatchExists(ID uuid.UUID) bool
+		UserOnMatch(UID uuid.UUID) bool
+		MatchEnded(ID uuid.UUID) bool
+		Remove(ID uuid.UUID) error
 	}
-	Queue interface {
+	BattleQueue interface {
+		GetAll() []uuid.UUID
+		Enqueue(UID uuid.UUID)
+		Dequeue() error
+		UserEnqueued(uuid.UUID) bool
+	}
+	TradingQueue interface {
 		GetAll() []uuid.UUID
 		Enqueue(UID uuid.UUID)
 		Dequeue() error
@@ -39,9 +48,10 @@ type Repositories struct {
 
 func New() *Repositories {
 	return &Repositories{
-		User:  users.New(),
-		Card:  cards.New(),
-		Match: matches.New(),
-		Queue: queue.New(),
+		User:         users.New(),
+		Card:         cards.New(),
+		Match:        matches.New(),
+		BattleQueue:  queue.New(),
+		TradingQueue: queue.New(),
 	}
 }
