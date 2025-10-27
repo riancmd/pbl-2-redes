@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	handlers "pbl-2-redes/internal/handlers/http"
+	"pbl-2-redes/internal/infrastructure/cluster"
 	"pbl-2-redes/internal/repositories"
 	"pbl-2-redes/internal/usecases"
 	"strconv"
@@ -12,20 +13,6 @@ import (
 // onde PORT deve ser substituido pelo inteiro que representa a porta do server
 
 func main() {
-	// Configurando a injeção de dependências
-	repos := repositories.New()     // Repositórios
-	useCases := usecases.New(repos) // UseCases
-
-	// Atualização do banco de dados
-	err := useCases.AddCardsFromFile("../../internal/data/cardVault.json", 100000)
-
-	if err != nil {
-		panic(err)
-	}
-
-	// Handlers
-	h := handlers.New(useCases)
-
 	// Configuração dos peers
 	allPeerAddresses := []int{
 		7700,
@@ -51,6 +38,24 @@ func main() {
 		}
 	}
 
+	// Configurando a injeção de dependências
+	repos := repositories.New() // Repositórios
+	// Cria o Client no Cluster
+	client := cluster.New(myPeers, port)
+	useCases := usecases.New(repos, client) // UseCases
+
+	// Handlers
+	h := handlers.New(useCases)
+
 	go h.Listen(port) // Roda na porta especificada
+
+	if client.bullyElection.isLeader() {
+		// Atualização do banco de dados
+		err = useCases.AddCardsFromFile("../../internal/data/cardVault.json", 100000)
+	}
+
+	if err != nil {
+		panic(err)
+	}
 
 }

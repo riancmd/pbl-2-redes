@@ -3,6 +3,7 @@ package cluster
 import (
 	"encoding/json"
 	"net/http"
+	"pbl-2-redes/internal/infrastructure/bully"
 	"pbl-2-redes/internal/models"
 	"strconv"
 	"time"
@@ -12,8 +13,9 @@ import (
 
 // Representa o Client (outbound) daquele servidor específico dentro do Cluster
 type Client struct {
-	peers      []int
-	httpClient *http.Client
+	peers         []int
+	bullyElection *bully.bullyElection // erro no package por algum motivo [CONSERTAR]
+	httpClient    *http.Client
 }
 
 // Cria um novo Client no Cluster
@@ -28,16 +30,23 @@ func New(allPeers []int, port int) *Client {
 		}
 	}
 
-	return &Client{
-		peers:      myPeers,
-		httpClient: &http.Client{Timeout: 5 * time.Second},
+	client := Client{
+		peers:         myPeers,
+		bullyElection: bully.New(port, myPeers),
+		httpClient:    &http.Client{Timeout: 5 * time.Second},
 	}
+
+	// Faz eleição
+	client.bullyElection.startElection()
+
+	return &client
 }
 
 // Faz a sincronização do banco de dados
+// Usado no início, pelo líder
 func (c *Client) SyncCards() ([]models.Booster, error) {
 	// dá um GET nas cartas
-	resp, err := c.httpClient.Get("http://localhost:" + strconv.Itoa(c.peers[0]) + "/cards")
+	resp, err := c.httpClient.Get("http://localhost:" + strconv.Itoa(c.peers[0]) + "/cards") // Endereço temporário, resolver
 
 	if err != nil {
 		return nil, err
