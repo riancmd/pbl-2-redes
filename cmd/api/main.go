@@ -35,7 +35,7 @@ func main() {
 		7704,
 	}
 
-	myPeers := []int{} // Mantém vazia a lista, pois aindão não sabe quem são
+	myPeers := []int{} // Mantém vazia a lista, pois ainda não não sabe quem são
 
 	// Configuração da porta
 	port, err := strconv.Atoi(os.Args[1])
