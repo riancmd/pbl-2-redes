@@ -27,7 +27,7 @@ func (h Handlers) addUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := h.useCases.AddUser(req)
+	err := h.useCases.AddUser(req)
 
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -37,5 +37,4 @@ func (h Handlers) addUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(models.CreateUserResponse{NewUserID: id})
 }
