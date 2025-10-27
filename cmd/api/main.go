@@ -2,7 +2,7 @@ package main
 
 import (
 	"os"
-	"pbl-2-redes/internal/handlers"
+	handlers "pbl-2-redes/internal/handlers/http"
 	"pbl-2-redes/internal/repositories"
 	"pbl-2-redes/internal/usecases"
 	"strconv"

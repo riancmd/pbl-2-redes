@@ -8,11 +8,14 @@ import (
 	"github.com/google/uuid"
 )
 
+// Retorna repositório contendo todas as partidas
+// Serve para sincronizar as partidas
 func (u UseCases) GetAllMatches() []models.Match {
 	matches := u.repos.Match.GetAll()
 	return matches
 }
 
+// Adiciona uma partida à lista de partidas
 func (u UseCases) AddMatch(P1, P2 models.User) error {
 	// Verifica se usuário já está em partida
 	players := make([]models.User, 0)
@@ -42,11 +45,19 @@ func (u UseCases) AddMatch(P1, P2 models.User) error {
 		//inbox:            make(chan models.matchMsg, 16),
 	}
 
+	err := u.sync.MatchNew(repoReq)
+
+	if err != nil {
+		slog.Error("couldn't create match")
+		return err
+	}
+
 	u.repos.Match.Add(repoReq)
 
 	return nil
 }
 
+// Finaliza partida
 func (u UseCases) EndMatch(ID uuid.UUID) error {
 	// Verifica se partida realmente finalizou
 	finished := u.repos.Match.MatchEnded(ID)
@@ -56,6 +67,7 @@ func (u UseCases) EndMatch(ID uuid.UUID) error {
 		return errors.New("battle is still going")
 	}
 
+	u.sync.MatchEnd(ID)
 	err := u.repos.Match.Remove(ID)
 
 	if err != nil {

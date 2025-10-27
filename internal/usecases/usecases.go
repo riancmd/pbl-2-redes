@@ -8,11 +8,13 @@ import (
 type UseCases struct {
 	repos *repositories.Repositories
 	utils *utils.Utils
+	sync  ClusterSync
 }
 
-func New(repos *repositories.Repositories) *UseCases {
+func New(repos *repositories.Repositories, sync ClusterSync) *UseCases {
 	return &UseCases{
 		repos: repos,
 		utils: utils.New(),
+		sync:  sync,
 	}
 }

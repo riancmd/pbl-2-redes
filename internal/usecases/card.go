@@ -8,11 +8,13 @@ import (
 	"time"
 )
 
+// Retorna todo o vault de cartas
 func (u UseCases) GetAllCards() []models.Booster {
 	cards := u.repos.Card.GetAll()
 	return cards
 }
 
+// Adiciona novas cartas ao vault
 func (u UseCases) AddCards(newBooster models.Booster) error {
 	if u.repos.Card == nil {
 		return errors.New("vault doesn't exist")
@@ -23,6 +25,7 @@ func (u UseCases) AddCards(newBooster models.Booster) error {
 	return nil
 }
 
+// Pega um booster do vault e o retorna
 func (u UseCases) GetBooster() (models.Booster, error) {
 	// verifica se vault vazio
 	empty := u.repos.Card.CardsEmpty()
@@ -35,9 +38,17 @@ func (u UseCases) GetBooster() (models.Booster, error) {
 	// pega um indice aleatorio
 	generator := rand.New(rand.NewSource(time.Now().UnixNano())) // gerador
 	randomIndex := generator.Intn(u.repos.Card.Length())
+
+	u.sync.BuyBooster(randomIndex)
+
 	return u.repos.Card.GetBooster(randomIndex)
 }
 
+// Remove um booster do vault
+// Deve ser usado depois de comprar a carta, internamente
+// Caso um servidor que não foi o que comprou a carta pra seu cliente receber uma notificação para remover certa carta,
+// usa-se essa função
+// Dessa forma, não é preciso sincronizar diretamente nela, pois ela só funciona caso tenha acontecido uma compra
 func (u UseCases) RemoveBooster(BID int) error {
 	return u.repos.Card.Remove(BID)
 }

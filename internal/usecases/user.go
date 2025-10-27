@@ -7,11 +7,13 @@ import (
 	"time"
 )
 
+// Retorna lista com todos os usuários
 func (u UseCases) GetAllUsers() []models.User {
 	users := u.repos.User.GetAll()
 	return users
 }
 
+// Acrescenta novo usuário
 func (u UseCases) AddUser(newUser models.CreateUserRequest) error {
 	exists := u.repos.User.UserExists(newUser.Username)
 
@@ -30,6 +32,14 @@ func (u UseCases) AddUser(newUser models.CreateUserRequest) error {
 		TotalWins:   0,
 		TotalLosses: 0,
 		IsInBattle:  false,
+	}
+
+	// Verifica se existe em outro servidor
+	err := u.sync.UserNew(newUser.Username)
+
+	if err != nil {
+		slog.Error("this user already exists", "username", newUser.Username)
+		return err
 	}
 
 	u.repos.User.Add(repoReq)
