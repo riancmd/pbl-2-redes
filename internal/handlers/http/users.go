@@ -23,7 +23,7 @@ func (h Handlers) addUser(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Reason: err.Error()})
+		json.NewEncoder(w).Encode(models.ErrorResponse{Type: "Erro na adição de usuário", Message: err.Error()})
 
 		return
 	}
@@ -32,7 +32,7 @@ func (h Handlers) addUser(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Reason: err.Error()})
+		json.NewEncoder(w).Encode(models.ErrorResponse{Type: "Erro na adição de usuário", Message: err.Error()})
 
 		return
 	}

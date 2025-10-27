@@ -754,7 +754,7 @@ func clearScreen() {
 	}
 }
 
-// Função para dar publish de forma genérica sem se importar com o tipo de requisição
+// Função para colocar na fila do canal no redis uma requisição
 func publishRequest(channel string, payload interface{}) {
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -762,7 +762,7 @@ func publishRequest(channel string, payload interface{}) {
 		return
 	}
 
-	if err := rdb.Publish(ctx, channel, data).Err(); err != nil {
-		fmt.Printf("❌ Erro ao publicar requisição: %v\n", err)
+	if err := rdb.LPush(ctx, channel, data).Err(); err != nil {
+		fmt.Printf("❌ Erro ao ENFILEIRAR  requisição: %v\n", err)
 	}
 }

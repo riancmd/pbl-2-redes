@@ -30,17 +30,17 @@ func (u UseCases) AddMatch(P1, P2 models.User) error {
 	}
 
 	repoReq := models.Match{
-		ID:    uuid.New(),
+		ID:    uuid.New().String(),
 		P1:    &P1,
 		P2:    &P2,
 		State: models.Running,
 		Turn:  P1.UID,
 
-		Hand:             map[uuid.UUID][]*models.Card{},
-		Sanity:           map[uuid.UUID]int{P1.UID: 40, P2.UID: 40},
-		DreamStates:      map[uuid.UUID]models.DreamState{P1.UID: models.Sleepy, P2.UID: models.Sleepy},
-		RoundsInState:    map[uuid.UUID]int{P1.UID: 0, P2.UID: 0},
-		StateLockedUntil: map[uuid.UUID]int{P1.UID: 0, P2.UID: 0},
+		Hand:             map[string][]*models.Card{},
+		Sanity:           map[string]int{P1.UID: 40, P2.UID: 40},
+		DreamStates:      map[string]models.DreamState{P1.UID: models.Sleepy, P2.UID: models.Sleepy},
+		RoundsInState:    map[string]int{P1.UID: 0, P2.UID: 0},
+		StateLockedUntil: map[string]int{P1.UID: 0, P2.UID: 0},
 		CurrentRound:     1,
 		//inbox:            make(chan models.matchMsg, 16),
 	}
@@ -58,7 +58,7 @@ func (u UseCases) AddMatch(P1, P2 models.User) error {
 }
 
 // Finaliza partida
-func (u UseCases) EndMatch(ID uuid.UUID) error {
+func (u UseCases) EndMatch(ID string) error {
 	// Verifica se partida realmente finalizou
 	finished := u.repos.Match.MatchEnded(ID)
 

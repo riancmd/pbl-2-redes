@@ -55,7 +55,7 @@ type TradeRequest struct {
 // "Requisição" de envio de uma ação em uma batalha
 type GameActionRequest struct {
 	Type               string `json:"type"`
-	UserId             string `json:"userid"`
+	UserId             string `json:"userId"`
 	ClientReplyChannel string `json:"clientReplyChannel"`
 }
 
