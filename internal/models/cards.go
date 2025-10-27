@@ -39,10 +39,10 @@ const (
 type DreamState string
 
 const (
-	sleepy    DreamState = "adormecido"
-	conscious DreamState = "consciente"
-	paralyzed DreamState = "paralisado"
-	scared    DreamState = "assustado"
+	Sleepy    DreamState = "adormecido"
+	Conscious DreamState = "consciente"
+	Paralyzed DreamState = "paralisado"
+	Scared    DreamState = "assustado"
 )
 
 type Booster struct {

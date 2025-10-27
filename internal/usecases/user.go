@@ -5,25 +5,25 @@ import (
 	"log/slog"
 	"pbl-2-redes/internal/models"
 	"time"
-
-	"github.com/google/uuid"
 )
 
+// Retorna lista com todos os usuários
 func (u UseCases) GetAllUsers() []models.User {
 	users := u.repos.User.GetAll()
 	return users
 }
 
-func (u UseCases) AddUser(newUser models.CreateUserRequest) (uuid.UUID, error) {
+// Acrescenta novo usuário
+func (u UseCases) AddUser(newUser models.CreateUserRequest) error {
 	exists := u.repos.User.UserExists(newUser.Username)
 
 	if exists {
 		slog.Error("this user already exists", "username", newUser.Username)
-		return uuid.Nil, errors.New("user already exists")
+		return errors.New("user already exists")
 	}
 
 	repoReq := models.User{
-		UID:         uuid.New(),
+		UID:         newUser.UID,
 		Username:    newUser.Username,
 		Password:    newUser.Password,
 		Deck:        make([]*models.Card, 0),
@@ -34,7 +34,15 @@ func (u UseCases) AddUser(newUser models.CreateUserRequest) (uuid.UUID, error) {
 		IsInBattle:  false,
 	}
 
+	// Verifica se existe em outro servidor
+	err := u.sync.UserNew(newUser.Username)
+
+	if err != nil {
+		slog.Error("this user already exists", "username", newUser.Username)
+		return err
+	}
+
 	u.repos.User.Add(repoReq)
 
-	return repoReq.UID, nil
+	return nil
 }

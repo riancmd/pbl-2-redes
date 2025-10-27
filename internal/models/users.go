@@ -8,7 +8,7 @@ import (
 
 // registro do usuário em memória
 type User struct {
-	UID         uuid.UUID
+	UID         string
 	Username    string
 	Password    string
 	Deck        []*Card
@@ -20,6 +20,7 @@ type User struct {
 }
 
 type CreateUserRequest struct {
+	UID      uuid.UUID
 	Username string `json:"username"`
 	Password string `json:"password"`
 }

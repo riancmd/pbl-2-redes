@@ -11,6 +11,13 @@ type ExternalResponse struct {
 	Data   json.RawMessage `json:"data"` //Struct especifica para ser decodificada
 }
 
+// Requisição externa para canal do servidor que lidará com requisições envolvendo pareamento (batalha ou troca)
+type ExternalRequest struct {
+	Type   string          `json:"type"`
+	UserId string          `json:"userId"`
+	Data   json.RawMessage `json:"data"` //Struct especifica para ser decodificada
+}
+
 // Requisição de login/cadastro
 type AuthenticationRequest struct {
 	Type               string `json:"type"` //login ou register
@@ -39,12 +46,6 @@ type NewCardRequest struct {
 	Card               Card   `json:"card"`
 }
 
-// Requisição de ping
-type PingRequest struct {
-	UserId             string `json:"userId"`
-	ClientReplyChannel string `json:"clientReplyChannel"` //Canal pessoal do cliente para PUBLISH
-}
-
 // Requisição de Troca de carta
 type TradeRequest struct {
 	UserId             string `json:"userId"`
@@ -60,9 +61,11 @@ type GameActionRequest struct {
 
 // Resposta de Login/Cadastro
 type AuthResponse struct {
-	Status   bool   `json:"status"`
-	Username string `json:"username"`
-	Message  string `json:"message"`
+	Status        bool   `json:"status"`
+	Username      string `json:"username"`
+	UDPPort       string `json:"udpPort"`
+	ServerChannel string `json:"serverChannel"`
+	Message       string `json:"message"`
 }
 
 // Resposta para batalhas (entrada ou não / solicitação de envio de nova carta)
@@ -79,16 +82,24 @@ type ClientPurchaseResponse struct {
 	BoosterGenerated Booster `json:"booster"`
 }
 
-// Resposta de Pong
-type PongResponse struct {
-	Status bool `json:"status"`
-}
-
 // Resposta para trocas de cartas (pareamento ou não / solicitação de envio de nova carta)
 type TradeResponse struct {
 	Type    string `json:"type"`
 	Status  bool   `json:"status"`
 	Message string `json:"message"`
+}
+
+// Payload para ações em batalha
+type PayLoad struct {
+	P1 *User `json:"p1"`
+	P2 *User `json:"p2"`
+
+	Info        string                `json:"info"`
+	Turn        string                `json:"turn"`
+	Hand        []Card                `json:"hand"`
+	Sanity      map[string]int        `json:"sanity"`
+	DreamStates map[string]DreamState `json:"dreamStates"`
+	Round       int                   `json:"round"`
 }
 
 // Resposta de erro

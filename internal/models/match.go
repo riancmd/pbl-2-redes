@@ -3,8 +3,6 @@ package models
 import (
 	"encoding/json"
 	"sync"
-
-	"github.com/google/uuid"
 )
 
 // SISTEMA DE MATCHMAKING
@@ -24,7 +22,7 @@ const (
 )
 
 type Match struct {
-	ID     uuid.UUID
+	ID     string
 	P1, P2 *User
 	State  MatchState
 	Turn   string // ID do jogador que joga a próxima ação
@@ -34,10 +32,10 @@ type Match struct {
 	DreamStates      map[string]DreamState
 	RoundsInState    map[string]int // para controlar duração dos estados
 	StateLockedUntil map[string]int // para controlar quando pode mudar estado
-	currentRound     int
+	CurrentRound     int
 
-	inbox chan matchMsg // canal para trocar msgs entre threads
-	mu    sync.Mutex
+	//inbox chan matchMsg // canal para trocar msgs entre threads
+	//mu *sync.Mutex
 }
 
 type MatchManager struct {

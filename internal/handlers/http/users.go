@@ -9,6 +9,7 @@ import (
 func (h Handlers) registerUserEndpoints() {
 	http.HandleFunc("GET /users", h.getAllUsers)
 	http.HandleFunc("POST /users", h.addUser)
+	//http.HandleFunc("DELETE /users{id}", h.deleteUser)
 }
 
 func (h Handlers) getAllUsers(w http.ResponseWriter, r *http.Request) {
@@ -22,20 +23,19 @@ func (h Handlers) addUser(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Type: "UserHandlerErr", Message: err.Error()})
+		json.NewEncoder(w).Encode(models.ErrorResponse{Reason: err.Error()})
 
 		return
 	}
 
-	id, err := h.useCases.AddUser(req)
+	err := h.useCases.AddUser(req)
 
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Type: "UserHandlerErr", Message: err.Error()})
+		json.NewEncoder(w).Encode(models.ErrorResponse{Reason: err.Error()})
 
 		return
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(models.CreateUserResponse{NewUserID: id})
 }

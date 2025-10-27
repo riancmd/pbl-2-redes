@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"pbl-2-redes/internal/models"
@@ -26,6 +27,13 @@ var (
 	// Variáveis de conexão ao Redis Cluster
 	rdb *redis.ClusterClient
 	ctx context.Context
+
+	// Variáveis para conexão UDP
+	udpPort  string
+	pingChan chan bool //Canal para parar a goroutine de heartbeating
+
+	//Canal no redis para requisições de batalha ou compra ao servidor logado
+	serverChannel string
 
 	// Dados do jogador
 	uid          string
@@ -72,10 +80,8 @@ const (
 	error      string = "error"
 
 	//Tipos de canais para dar Publish
-	AuthResquestChannel  string = "AuthResquestChannel"
-	BuyResquestChannel   string = "BuyResquestChannel"
-	MatchResquestChannel string = "AuthResquestChannel"
-	PingResquestChannel  string = "AuthResquestChannel"
+	AuthResquestChannel string = "AuthResquestChannel"
+	BuyResquestChannel  string = "BuyResquestChannel"
 )
 
 type CardType string
@@ -243,6 +249,7 @@ func showMenu() {
 			handlePing()
 		case "7":
 			fmt.Println("💤 Bons sonhos...")
+			stopPinger()
 			return
 		default:
 			fmt.Println("Opção inválida.")
@@ -260,8 +267,16 @@ func handleResponse(extRes models.ExternalResponse) {
 		if authResp.Status {
 			loggedIn = true
 			username = authResp.Username
+			udpPort = authResp.UDPPort
+			serverChannel = authResp.ServerChannel
+
+			stopPinger()                  // Caso já exista algum pinger antigo (Deu login e saiu)
+			pingChan = make(chan bool)    // Novo canal para controlar a parada do pinger heartbeating
+			go heartBeatHandler(pingChan) // Inicia o HeartBeat
+
 			fmt.Printf("✅ Bem vindo Jogador: %s\n", username)
 			fmt.Printf("Você ganhou 4 boosters gratuitos! Eles já estão em seu inventário\n")
+			fmt.Print("Você está conectado ao servidor de porta UDP %s", udpPort)
 		} else {
 			fmt.Printf("❌ Falha no registro: %s\n", authResp.Message)
 		}
@@ -272,7 +287,16 @@ func handleResponse(extRes models.ExternalResponse) {
 
 		if authResp.Status {
 			loggedIn = true
+			udpPort = authResp.UDPPort
+			serverChannel = authResp.ServerChannel
+
+			stopPinger()                  // Caso já exista algum pinger antigo (Deu login e saiu)
+			pingChan = make(chan bool)    // Novo canal para controlar a parada do pinger heartbeating
+			go heartBeatHandler(pingChan) // Inicia o HeartBeat
+
 			fmt.Printf("✅ Bem-vindo, %s!\n", username)
+			fmt.Print("Você está conectado ao servidor de porta UDP %s", udpPort)
+
 		} else {
 			fmt.Printf("❌ Falha no login: %s\n", authResp.Message)
 		}
@@ -300,44 +324,37 @@ func handleResponse(extRes models.ExternalResponse) {
 		json.Unmarshal(extRes.Data, &matchResp)
 		fmt.Printf("⏳ %s\n", matchResp.Message)
 
-		/*	case gamestart: //Fiquei em duvida do que fazer aqui
-			var payload struct {
-				Info        string                `json:"info"`
-				Turn        string                `json:"turn"`
-				Hand        []models.Card         `json:"hand"`
-				Sanity      map[string]int        `json:"sanity"`
-				DreamStates map[string]DreamState `json:"dreamStates"`
-			}
+	case gamestart:
+		var payload models.PayLoad
 
-			json.Unmarshal(extRes.Data, &payload)
-			inBattle = true
-			matchMu.Lock()
-			hand = make([]*models.Card, len(payload.Hand))
+		json.Unmarshal(extRes.Data, &payload)
+		inBattle = true
+		matchMu.Lock()
+		hand = make([]*models.Card, len(payload.Hand))
 
-			for i := range payload.Hand {
-				hand[i] = &payload.Hand[i]
-			}
-
-			matchInfo.P2 = payload.Info
-			matchInfo.Sanity = payload.Sanity
-			matchInfo.DreamStates = payload.DreamStates
-			matchInfo.CurrentTurnUID = payload.Turn
-			matchMu.Unlock()
-
-			fmt.Printf("⚔️ Partida encontrada! Você está batalhando contra %s.\n", matchInfo.OpponentUsername)
-			fmt.Println("Sanidade inicial:")
-			fmt.Printf("Você: %d\n", matchInfo.Sanity[uid])
-			fmt.Printf("Seu oponente: %d\n", matchInfo.Sanity[getOpponentUID()])
-			if matchInfo.CurrentTurnUID == uid {
-				turnSignal <- struct{}{}
-			} else {
-				fmt.Printf("⏳ Turno do seu oponente. Aguarde...\n")
-			}
-		*/
-	case newturn:
-		var payload struct {
-			Turn string `json:"turn"`
+		for i := range payload.Hand {
+			hand[i] = &payload.Hand[i]
 		}
+
+		matchInfo.P2 = payload.P2
+		matchInfo.Sanity = payload.Sanity
+		matchInfo.DreamStates = payload.DreamStates
+		matchInfo.Turn = payload.Turn
+		matchMu.Unlock()
+
+		fmt.Printf("⚔️ Partida encontrada! Você está batalhando contra %s.\n", matchInfo.P2.Username)
+		fmt.Println("Sanidade inicial:")
+		fmt.Printf("Você: %d\n", matchInfo.Sanity[uid])
+		fmt.Printf("Seu oponente: %d\n", matchInfo.P2.UID)
+		if matchInfo.Turn == uid {
+			turnSignal <- struct{}{}
+		} else {
+			fmt.Printf("⏳ Turno do seu oponente. Aguarde...\n")
+		}
+
+	case newturn:
+		var payload models.PayLoad
+
 		json.Unmarshal(extRes.Data, &payload)
 		matchMu.Lock()
 		matchInfo.Turn = payload.Turn
@@ -345,9 +362,9 @@ func handleResponse(extRes models.ExternalResponse) {
 
 		if matchInfo.Turn == uid {
 			fmt.Printf("\n--- Status do Jogo ---\n")
-			fmt.Printf("Rodada: %d\n", matchInfo.currentRound)
+			fmt.Printf("Rodada: %d\n", matchInfo.CurrentRound)
 			fmt.Printf("Sua Sanidade: %d (%s)\n", matchInfo.Sanity[uid], strings.Title(string(matchInfo.DreamStates[uid])))
-			opponentUID := getOpponentUID()
+			opponentUID := matchInfo.P2.UID
 			fmt.Printf("Sanidade do Oponente: %d (%s)\n", matchInfo.Sanity[opponentUID], strings.Title(string(matchInfo.DreamStates[opponentUID])))
 			fmt.Println("\n➡️ É o seu turno! Escolha uma carta para jogar (pelo número) ou digite `gv` para desistir.")
 			select {
@@ -357,31 +374,27 @@ func handleResponse(extRes models.ExternalResponse) {
 			turnSignal <- struct{}{}
 		} else {
 			fmt.Printf("\n--- Status do Jogo ---\n")
-			fmt.Printf("Rodada: %d\n", matchInfo.Round)
+			fmt.Printf("Rodada: %d\n", matchInfo.CurrentRound)
 			fmt.Printf("Sua Sanidade: %d (%s)\n", matchInfo.Sanity[uid], strings.Title(string(matchInfo.DreamStates[uid])))
-			opponentUID := getOpponentUID()
+			opponentUID := matchInfo.P2.UID
 			fmt.Printf("Sanidade do Oponente: %d (%s)\n", matchInfo.Sanity[opponentUID], strings.Title(string(matchInfo.DreamStates[opponentUID])))
 			fmt.Printf("\n⏳ Turno do seu oponente. Aguarde...\n")
 		}
 
 	case updateinfo:
-		var payload struct {
-			Turn        string                `json:"turn"`
-			Sanity      map[string]int        `json:"sanity"`
-			DreamStates map[string]DreamState `json:"dreamStates"`
-			Round       int                   `json:"round"`
-		}
-		json.Unmarshal(resp.Data, &payload)
+		var payload models.PayLoad
+
+		json.Unmarshal(extRes.Data, &payload)
 		matchMu.Lock()
 		matchInfo.Sanity = payload.Sanity
 		matchInfo.DreamStates = payload.DreamStates
-		matchInfo.Round = payload.Round
+		matchInfo.CurrentRound = payload.Round
 		matchMu.Unlock()
 
 		fmt.Printf("\n--- Status do Jogo ---\n")
-		fmt.Printf("Rodada: %d\n", matchInfo.Round)
+		fmt.Printf("Rodada: %d\n", matchInfo.CurrentRound)
 		fmt.Printf("Sua Sanidade: %d (%s)\n", matchInfo.Sanity[uid], strings.Title(string(matchInfo.DreamStates[uid])))
-		opponentUID := getOpponentUID()
+		opponentUID := matchInfo.P2.UID
 		fmt.Printf("Sanidade do Oponente: %d (%s)\n", matchInfo.Sanity[opponentUID], strings.Title(string(matchInfo.DreamStates[opponentUID])))
 
 	case newvictory:
@@ -395,15 +408,6 @@ func handleResponse(extRes models.ExternalResponse) {
 	case newtie:
 		inBattle = false
 		fmt.Println("\n🤝 Empate! A partida terminou em um empate.")
-
-	case pong:
-		var pongResp models.PongResponse
-		json.Unmarshal(extRes.Data, &pongResp)
-		if pongResp.Status {
-			fmt.Println("🏓 Pong recebido!")
-		} else {
-			fmt.Println("❌ Servidor respondeu ao ping, mas com status 'false'.")
-		}
 
 	case error:
 		var errResp models.ErrorResponse
@@ -467,7 +471,19 @@ func handleEnqueue() {
 		UserId:             uid,
 		ClientReplyChannel: replyChannel,
 	}
-	publishRequest(MatchResquestChannel, req)
+
+	bytesReq, err := json.Marshal(req)
+	if err != nil {
+		log.Fatalf("Erro ao serializar requisição de batalha: %v", err)
+	}
+
+	extReq := models.ExternalRequest{
+		Type:   battle,
+		UserId: uid,
+		Data:   json.RawMessage(bytesReq),
+	}
+
+	publishRequest(serverChannel, extReq)
 }
 
 func handleBattleTurn() {
@@ -508,7 +524,19 @@ func useCard(card *models.Card) {
 		ClientReplyChannel: replyChannel,
 		Card:               *card,
 	}
-	//Canal de batalha criado publishRequest(, req)
+
+	bytesReq, err := json.Marshal(req)
+	if err != nil {
+		log.Fatalf("Erro ao serializar requisição de uso de carta: %v", err)
+	}
+
+	extReq := models.ExternalRequest{
+		Type:   usecard,
+		UserId: uid,
+		Data:   json.RawMessage(bytesReq),
+	}
+
+	publishRequest(serverChannel, extReq)
 
 	matchMu.Lock()
 	defer matchMu.Unlock()
@@ -527,27 +555,139 @@ func giveUp() {
 		UserId:             uid,
 		ClientReplyChannel: replyChannel,
 	}
-	//Canal de batalha criado publishRequest(ServerRequestChannel, req)
+
+	bytesReq, err := json.Marshal(req)
+	if err != nil {
+		log.Fatalf("Erro ao serializar requisição de desistência: %v", err)
+	}
+
+	extReq := models.ExternalRequest{
+		Type:   giveup,
+		UserId: uid,
+		Data:   json.RawMessage(bytesReq),
+	}
+
+	publishRequest(serverChannel, extReq)
 }
 
 func handlePing() {
-	fmt.Println("Pingando o servidor...")
-	req := models.PingRequest{
-		UserId:             uid,
-		ClientReplyChannel: replyChannel,
+	if udpPort == "" {
+		fmt.Println("❌ Porta UDP do servidor não definida. Tente logar novamente.")
+		return
 	}
-	publishRequest(PingResquestChannel, req)
+
+	serverAddr, err := net.ResolveUDPAddr("udp", udpPort)
+	if err != nil {
+		fmt.Printf("❌ erro ao resolver endereço: %v\n", err)
+		return
+	}
+
+	connection, err := net.DialUDP("udp", nil, serverAddr)
+	if err != nil {
+		fmt.Printf("❌ erro ao conectar: %v\n", err)
+		return
+	}
+	defer connection.Close()
+
+	// timeout de 999 ms
+	connection.SetReadDeadline(time.Now().Add(999 * time.Millisecond))
+
+	start := time.Now()
+	// Envia o UID como "ping"
+	_, err = connection.Write([]byte(uid))
+	if err != nil {
+		fmt.Printf("❌ erro ao enviar ping: %v\n", err)
+		return
+	}
+
+	buffer := make([]byte, 1024)
+	n, _, err := connection.ReadFromUDP(buffer)
+	if err != nil {
+		fmt.Printf("⏰ timeout: %v\n", err) // Servidor demorou > 999ms
+		return
+	}
+
+	if string(buffer[:n]) == "pong" {
+		elapsed := time.Since(start).Milliseconds()
+		fmt.Printf("🏓 latência: %d ms\n", elapsed)
+	} else {
+		fmt.Printf("❌ resposta inválida: %s\n", string(buffer[:n]))
+	}
 }
 
-func getOpponentUID() string {
-	matchMu.RLock()
-	defer matchMu.RUnlock()
-	for id := range matchInfo.Sanity {
-		if id != uid {
-			return id
+// Função auxiliar para fechar canal de ping
+func stopPinger() {
+	if pingChan != nil {
+		// Fechar o canal envia um sinal para a goroutine parar
+		close(pingChan)
+		pingChan = nil
+	}
+}
+
+// Função auxiliar para forçar a voltar ao login
+func forceLogout() {
+	if !loggedIn {
+		return
+	}
+
+	loggedIn = false
+	inBattle = false
+	stopPinger() // Para a goroutine de ping
+
+	clearScreen()
+	fmt.Println("\n=============================================")
+	fmt.Println("❌ Conexão com o servidor perdida (timeout UDP).")
+	fmt.Println("Você foi desconectado. Por favor, faça login novamente.")
+	fmt.Println("=============================================")
+}
+
+// Função que checa constantemente se o servidor está ativo (HeartBeating)
+func heartBeatHandler(stopChan <-chan bool) {
+	serverAddr, err := net.ResolveUDPAddr("udp", udpPort)
+	if err != nil {
+		fmt.Println("Endereço UDP inválido, parando heartbeat.")
+		forceLogout()
+		return
+	}
+
+	for {
+		select {
+		case <-stopChan:
+			// O canal foi fechado (sinal para parar vindo do stopPinger)
+			fmt.Println("Heartbeat parado.")
+			return
+
+		case <-time.After(5 * time.Second):
+			// Espera 5 segundos antes de fazer o check
+			conn, err := net.DialUDP("udp", nil, serverAddr)
+			if err != nil {
+				// Se nem consegue "discar", o servidor caiu feio
+				forceLogout()
+				return
+			}
+
+			// Timeout de 3 segundos para a RESPOSTA
+			conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+
+			if _, err := conn.Write([]byte(uid)); err != nil {
+				conn.Close()
+				continue // Tenta de novo no próximo loop
+			}
+
+			buffer := make([]byte, 16)
+			_, _, err = conn.ReadFromUDP(buffer)
+			if err != nil {
+				// --- DETECÇÃO DE FALHA ---
+				// Servidor não respondeu em 3 segundos.
+				conn.Close()
+				forceLogout() // Desloga
+				return        // Mata esta goroutine
+			}
+
+			// Se chegou aqui, está tudo OK.
+			conn.Close()
 		}
 	}
-	return ""
 }
 
 // função que mostra inventário

@@ -18,6 +18,8 @@ func New(useCases *usecases.UseCases) *Handlers {
 func (h Handlers) Listen(port int) error {
 	h.registerUserEndpoints()
 	h.registerCardEndpoints()
+	h.registerBattleQueueEndpoints()
+	h.registerTradingQueueEndpoints()
 
 	slog.Info("listening on", "port", port)
 

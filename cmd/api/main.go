@@ -2,7 +2,7 @@ package main
 
 import (
 	"os"
-	"pbl-2-redes/internal/handlers"
+	handlers "pbl-2-redes/internal/handlers/http"
 	"pbl-2-redes/internal/repositories"
 	"pbl-2-redes/internal/usecases"
 	"strconv"
@@ -35,7 +35,7 @@ func main() {
 		7704,
 	}
 
-	myPeers := []int{} // Mantém vazia a lista, pois aindão não sabe quem são
+	myPeers := []int{} // Mantém vazia a lista, pois ainda não não sabe quem são
 
 	// Configuração da porta
 	port, err := strconv.Atoi(os.Args[1])
