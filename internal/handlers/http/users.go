@@ -9,6 +9,7 @@ import (
 func (h Handlers) registerUserEndpoints() {
 	http.HandleFunc("GET /users", h.getAllUsers)
 	http.HandleFunc("POST /users", h.addUser)
+	//http.HandleFunc("DELETE /users{id}", h.deleteUser)
 }
 
 func (h Handlers) getAllUsers(w http.ResponseWriter, r *http.Request) {

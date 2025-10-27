@@ -33,7 +33,7 @@ func (q *Queue) Enqueue(UID uuid.UUID) {
 
 func (q *Queue) Dequeue() error {
 	if len(q.queue) >= 1 {
-		q.queue = q.queue[:len(q.queue)-1]
+		q.queue = q.queue[1:]
 		return nil
 	}
 	return errors.New("queue is empty")
