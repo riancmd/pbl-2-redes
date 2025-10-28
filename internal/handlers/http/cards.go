@@ -32,7 +32,7 @@ func (h Handlers) removeBooster(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Reason: err.Error()})
+		json.NewEncoder(w).Encode(models.ErrorResponse{Type: "Erro na remoção de booster", Message: err.Error()})
 
 		return
 	}

@@ -1,34 +1,51 @@
-package main
+package client
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/exec"
+	"pbl-2-redes/internal/models"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9" // Conexão Redis
 )
 
 var (
-	connection net.Conn
-	enc        *json.Encoder
-	dec        *json.Decoder
+	enc *json.Encoder
+	dec *json.Decoder
 
-	// dados do jogador
-	uid      string
-	username string
-	loggedIn bool
+	// Variáveis de conexão ao Redis Cluster
+	rdb *redis.ClusterClient
+	ctx context.Context
+
+	// Variáveis para conexão UDP
+	udpPort  string
+	pingChan chan bool //Canal para parar a goroutine de heartbeating
+
+	//Canal no redis para requisições de batalha ou compra ao servidor logado
+	serverChannel string
+
+	// Dados do jogador
+	uid          string
+	username     string
+	loggedIn     bool
+	replyChannel string //Canal no Redis Cluster para o cliente receber respostas
 
 	// dados do jogo
-	inventory  []*Card
+	inventory  []*models.Card
 	invMu      sync.RWMutex
-	hand       []*Card
-	matchInfo  *MatchInfo
+	hand       []*models.Card
+	matchInfo  *models.Match
 	inBattle   bool
 	turnSignal chan struct{}
 
@@ -37,13 +54,16 @@ var (
 )
 
 const (
-	register   string = "register"
-	login      string = "login"
-	buypack    string = "buyNewPack"
-	battle     string = "battle"
-	usecard    string = "useCard"
-	giveup     string = "giveUp"
-	ping       string = "ping"
+	//Tipos de requisições
+	register string = "register"
+	login    string = "login"
+	buypack  string = "buyNewPack"
+	battle   string = "battle"
+	usecard  string = "useCard"
+	giveup   string = "giveUp"
+	ping     string = "ping"
+
+	//Tipos de respostas
 	registered string = "registered"
 	loggedin   string = "loggedIn"
 	packbought string = "packBought"
@@ -57,6 +77,11 @@ const (
 	newvictory string = "newVictory"
 	newtie     string = "newTie"
 	pong       string = "pong"
+	error      string = "error"
+
+	//Tipos de canais para dar Publish
+	AuthResquestChannel string = "AuthResquestChannel"
+	BuyResquestChannel  string = "BuyResquestChannel"
 )
 
 type CardType string
@@ -94,77 +119,82 @@ const (
 	scared    DreamState = "assustado"
 )
 
-// mensagem padrão para conversa cliente-servidor
-type Message struct {
-	Request string          `json:"request"`
-	UID     string          `json:"uid"` // user id
-	Data    json.RawMessage `json:"data"`
-}
-
-type PlayerResponse struct {
-	UID      string `json:"UID"`
-	Username string `json:"username"`
-}
-
-type Card struct {
-	Name       string     `json:"name"`
-	CID        string     `json:"CID"`  // card ID
-	Desc       string     `json:"desc"` // descrição
-	CardType   CardType   `json:"cardtype"`
-	CardRarity CardRarity `json:"cardrarity"`
-	CardEffect CardEffect `json:"cardeffect"`
-	Points     int        `json:"points"`
-}
-
-type MatchInfo struct {
-	OpponentUsername string
-	Sanity           map[string]int
-	DreamStates      map[string]DreamState
-	CurrentTurnUID   string
-	Round            int
-}
-
 func main() {
-	addr := os.Getenv("SERVER_ADDR")
-	if addr == "" {
-		addr = ":8080"
+	//Endereços das instâncias dos redis
+	clusterAddrs := []string{
+		"redis-1:7000",
+		"redis-2:7001",
+		"redis-3:7002",
+		"redis-4:7003",
+		"redis-5:7004",
+		"redis-6:7005",
 	}
 
-	var err error
-	connection, err = net.Dial("tcp", addr)
-	if err != nil {
-		panic(err)
+	ctx = context.Background()
+
+	// Se conecta ao cluster
+	rdb = redis.NewClusterClient(&redis.ClusterOptions{
+		Addrs: clusterAddrs,
+	})
+
+	// Testa a conexão
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		log.Fatalf("❌ Falha ao conectar ao cluster Redis: %v", err)
 	}
-	defer connection.Close()
 
-	dec = json.NewDecoder(connection)
-	enc = json.NewEncoder(connection)
+	fmt.Println("✅ Conectado ao Cluster Redis.")
 
-	// Canal com buffer para evitar deadlock
+	// Geração de Id único
+	uid = uuid.New().String()
+	replyChannel = fmt.Sprintf("ClientChannel:%s", uid) //Gera o nome do canal de respostas do cliente
+	fmt.Printf("🆔 ID do Cliente: %s\n", uid)
+	fmt.Printf("📬 Escutando Respostas em: %s\n", replyChannel)
+
+	// Inicializa variáveis de estado
 	turnSignal = make(chan struct{}, 1)
-	matchInfo = &MatchInfo{
+	matchInfo = &models.Match{
 		Sanity:      make(map[string]int),
-		DreamStates: make(map[string]DreamState),
+		DreamStates: make(map[string]models.DreamState),
 	}
 
+	// Goroutine para lidar com mensagens que chegam no canal pessoal do cliente
 	go handleServerMessages()
+
+	// Mostrar o menu do jogo
 	showMenu()
 }
 
 func handleServerMessages() {
-	for {
-		var msg Message
-		if err := dec.Decode(&msg); err != nil {
-			if inBattle {
-				fmt.Println("❌ Conexão com o servidor perdida. Encerrando o jogo...")
-				inBattle = false
-			} else {
-				fmt.Println("❌ Conexão com o servidor perdida.")
-			}
-			return
+	//Criação do canal do REDIS
+	pubsub := rdb.Subscribe(ctx, replyChannel)
+	defer pubsub.Close()
+
+	// Espera a confirmação da inscrição
+	_, err := pubsub.Receive(ctx)
+	if err != nil {
+		log.Fatalf("Falha ao se inscrever no canal de resposta: %v", err)
+	}
+
+	//Canal da linguagem (diferente do canal em redis)
+	ch := pubsub.Channel()
+
+	for msg := range ch {
+		//Respostas são recebidas em uma struct genérica que é decodificada para uma resposta específica
+		var externalResponse models.ExternalResponse
+
+		if err := json.Unmarshal([]byte(msg.Payload), &externalResponse); err != nil {
+			fmt.Printf("❌ Erro ao decodificar mensagem do servidor: %v\n", err)
+			continue
 		}
 
-		handleResponse(msg)
+		// Valida se a resposta é para este cliente
+		if externalResponse.UserId != uid {
+			fmt.Println("Recebida mensagem para outro UserId, ignorando.")
+			continue
+		}
+
+		// Processa e Decodifica a resposta
+		handleResponse(externalResponse)
 	}
 }
 
@@ -216,9 +246,10 @@ func showMenu() {
 				handleEnqueue()
 			}
 		case "6":
-			testLatency()
+			handlePing()
 		case "7":
 			fmt.Println("💤 Bons sonhos...")
+			stopPinger()
 			return
 		default:
 			fmt.Println("Opção inválida.")
@@ -226,83 +257,116 @@ func showMenu() {
 	}
 }
 
-func handleResponse(msg Message) {
+func handleResponse(extRes models.ExternalResponse) {
 	clearScreen()
-	switch msg.Request {
+	switch extRes.Type { //Decodificar para tipo de resposta mais exata
 	case registered:
-		var resp PlayerResponse
-		json.Unmarshal(msg.Data, &resp)
-		uid = resp.UID
-		username = resp.Username
-		loggedIn = true
-		fmt.Printf("✅ Criado jogador #%s (%s)\n", uid, username)
-		fmt.Printf("Você ganhou 4 boosters gratuitos! Eles já estão em seu inventário\n")
+		var authResp models.AuthResponse
+		json.Unmarshal(extRes.Data, &authResp)
+
+		if authResp.Status {
+			loggedIn = true
+			username = authResp.Username
+			udpPort = authResp.UDPPort
+			serverChannel = authResp.ServerChannel
+
+			stopPinger()                  // Caso já exista algum pinger antigo (Deu login e saiu)
+			pingChan = make(chan bool)    // Novo canal para controlar a parada do pinger heartbeating
+			go heartBeatHandler(pingChan) // Inicia o HeartBeat
+
+			fmt.Printf("✅ Bem vindo Jogador: %s\n", username)
+			fmt.Printf("Você ganhou 4 boosters gratuitos! Eles já estão em seu inventário\n")
+			fmt.Print("Você está conectado ao servidor de porta UDP %s", udpPort)
+		} else {
+			fmt.Printf("❌ Falha no registro: %s\n", authResp.Message)
+		}
+
 	case loggedin:
-		var resp PlayerResponse
-		json.Unmarshal(msg.Data, &resp)
-		uid = resp.UID
-		username = resp.Username
-		loggedIn = true
-		fmt.Printf("✅ Login bem-sucedido! Bem-vindo, %s!\n", username)
+		var authResp models.AuthResponse
+		json.Unmarshal(extRes.Data, &authResp)
+
+		if authResp.Status {
+			loggedIn = true
+			udpPort = authResp.UDPPort
+			serverChannel = authResp.ServerChannel
+
+			stopPinger()                  // Caso já exista algum pinger antigo (Deu login e saiu)
+			pingChan = make(chan bool)    // Novo canal para controlar a parada do pinger heartbeating
+			go heartBeatHandler(pingChan) // Inicia o HeartBeat
+
+			fmt.Printf("✅ Bem-vindo, %s!\n", username)
+			fmt.Print("Você está conectado ao servidor de porta UDP %s", udpPort)
+
+		} else {
+			fmt.Printf("❌ Falha no login: %s\n", authResp.Message)
+		}
+
 	case packbought:
-		var cards []Card
-		json.Unmarshal(msg.Data, &cards)
-		invMu.Lock()
-		for i := range cards {
-			c := cards[i]
-			inventory = append(inventory, &c)
+		var purchaseResp models.ClientPurchaseResponse
+		json.Unmarshal(extRes.Data, &purchaseResp)
+
+		if purchaseResp.Status {
+			fmt.Println("🎁 Novo booster adquirido! Veja em seu inventário")
+			invMu.Lock()
+
+			for i := range purchaseResp.BoosterGenerated.Booster {
+				c := purchaseResp.BoosterGenerated.Booster[i]
+				inventory = append(inventory, &c)
+			}
+			invMu.Unlock()
+
+		} else {
+			fmt.Printf("❌ Erro ao comprar booster: %s\n", purchaseResp.Message)
 		}
-		invMu.Unlock()
-		fmt.Println("🎁 Novo booster adquirido! Veja em seu inventário")
+
 	case enqueued:
-		fmt.Println("⏳ Entrou na fila. Aguardando oponente...")
+		var matchResp models.MatchResponse
+		json.Unmarshal(extRes.Data, &matchResp)
+		fmt.Printf("⏳ %s\n", matchResp.Message)
+
 	case gamestart:
-		var payload struct {
-			Info        string
-			Turn        string
-			Hand        []Card
-			Sanity      map[string]int
-			DreamStates map[string]DreamState
-		}
-		json.Unmarshal(msg.Data, &payload)
+		var payload models.PayLoad
+
+		json.Unmarshal(extRes.Data, &payload)
 		inBattle = true
 		matchMu.Lock()
-		hand = make([]*Card, len(payload.Hand))
+		hand = make([]*models.Card, len(payload.Hand))
+
 		for i := range payload.Hand {
 			hand[i] = &payload.Hand[i]
 		}
-		matchInfo.OpponentUsername = payload.Info
+
+		matchInfo.P2 = payload.P2
 		matchInfo.Sanity = payload.Sanity
 		matchInfo.DreamStates = payload.DreamStates
-		matchInfo.CurrentTurnUID = payload.Turn
+		matchInfo.Turn = payload.Turn
 		matchMu.Unlock()
 
-		fmt.Printf("⚔️ Partida encontrada! Você está batalhando contra %s.\n", matchInfo.OpponentUsername)
+		fmt.Printf("⚔️ Partida encontrada! Você está batalhando contra %s.\n", matchInfo.P2.Username)
 		fmt.Println("Sanidade inicial:")
 		fmt.Printf("Você: %d\n", matchInfo.Sanity[uid])
-		fmt.Printf("Seu oponente: %d\n", matchInfo.Sanity[getOpponentUID()])
-		if matchInfo.CurrentTurnUID == uid {
+		fmt.Printf("Seu oponente: %d\n", matchInfo.P2.UID)
+		if matchInfo.Turn == uid {
 			turnSignal <- struct{}{}
 		} else {
 			fmt.Printf("⏳ Turno do seu oponente. Aguarde...\n")
 		}
+
 	case newturn:
-		var payload struct {
-			Turn string
-		}
-		json.Unmarshal(msg.Data, &payload)
+		var payload models.PayLoad
+
+		json.Unmarshal(extRes.Data, &payload)
 		matchMu.Lock()
-		matchInfo.CurrentTurnUID = payload.Turn
+		matchInfo.Turn = payload.Turn
 		matchMu.Unlock()
 
-		if matchInfo.CurrentTurnUID == uid {
+		if matchInfo.Turn == uid {
 			fmt.Printf("\n--- Status do Jogo ---\n")
-			fmt.Printf("Rodada: %d\n", matchInfo.Round)
+			fmt.Printf("Rodada: %d\n", matchInfo.CurrentRound)
 			fmt.Printf("Sua Sanidade: %d (%s)\n", matchInfo.Sanity[uid], strings.Title(string(matchInfo.DreamStates[uid])))
-			opponentUID := getOpponentUID()
+			opponentUID := matchInfo.P2.UID
 			fmt.Printf("Sanidade do Oponente: %d (%s)\n", matchInfo.Sanity[opponentUID], strings.Title(string(matchInfo.DreamStates[opponentUID])))
 			fmt.Println("\n➡️ É o seu turno! Escolha uma carta para jogar (pelo número) ou digite `gv` para desistir.")
-			// Limpa o canal antes de enviar um novo sinal
 			select {
 			case <-turnSignal:
 			default:
@@ -310,124 +374,116 @@ func handleResponse(msg Message) {
 			turnSignal <- struct{}{}
 		} else {
 			fmt.Printf("\n--- Status do Jogo ---\n")
-			fmt.Printf("Rodada: %d\n", matchInfo.Round)
+			fmt.Printf("Rodada: %d\n", matchInfo.CurrentRound)
 			fmt.Printf("Sua Sanidade: %d (%s)\n", matchInfo.Sanity[uid], strings.Title(string(matchInfo.DreamStates[uid])))
-			opponentUID := getOpponentUID()
+			opponentUID := matchInfo.P2.UID
 			fmt.Printf("Sanidade do Oponente: %d (%s)\n", matchInfo.Sanity[opponentUID], strings.Title(string(matchInfo.DreamStates[opponentUID])))
 			fmt.Printf("\n⏳ Turno do seu oponente. Aguarde...\n")
 		}
-	case notify:
-		var payload struct {
-			Message string
-		}
-		json.Unmarshal(msg.Data, &payload)
-		fmt.Printf("📣 %s\n", payload.Message)
+
 	case updateinfo:
-		var payload struct {
-			Turn        string
-			Sanity      map[string]int
-			DreamStates map[string]DreamState
-			Round       int
-		}
-		json.Unmarshal(msg.Data, &payload)
+		var payload models.PayLoad
+
+		json.Unmarshal(extRes.Data, &payload)
 		matchMu.Lock()
 		matchInfo.Sanity = payload.Sanity
 		matchInfo.DreamStates = payload.DreamStates
-		matchInfo.Round = payload.Round
+		matchInfo.CurrentRound = payload.Round
 		matchMu.Unlock()
 
 		fmt.Printf("\n--- Status do Jogo ---\n")
-		fmt.Printf("Rodada: %d\n", matchInfo.Round)
+		fmt.Printf("Rodada: %d\n", matchInfo.CurrentRound)
 		fmt.Printf("Sua Sanidade: %d (%s)\n", matchInfo.Sanity[uid], strings.Title(string(matchInfo.DreamStates[uid])))
-		opponentUID := getOpponentUID()
+		opponentUID := matchInfo.P2.UID
 		fmt.Printf("Sanidade do Oponente: %d (%s)\n", matchInfo.Sanity[opponentUID], strings.Title(string(matchInfo.DreamStates[opponentUID])))
+
 	case newvictory:
 		inBattle = false
 		fmt.Println("\n🎉 Vitória! Você venceu a partida!")
+
 	case newloss:
 		inBattle = false
 		fmt.Println("\n💔 Derrota. Você perdeu a partida.")
+
 	case newtie:
 		inBattle = false
 		fmt.Println("\n🤝 Empate! A partida terminou em um empate.")
+
+	case error:
+		var errResp models.ErrorResponse
+		json.Unmarshal(extRes.Data, &errResp)
+		fmt.Printf("❌ Erro do servidor (%s): %s\n", errResp.Type, errResp.Message)
+
 	default:
-		// Se for um erro do servidor, exibe a mensagem de erro
-		var errPayload struct {
-			Error string `json:"error"`
-		}
-		json.Unmarshal(msg.Data, &errPayload)
-		if errPayload.Error != "" {
-			fmt.Printf("❌ Erro do servidor: %s\n", errPayload.Error)
-		} else {
-			fmt.Printf("Recebida mensagem desconhecida do servidor: %s\n", msg.Request)
-		}
+		fmt.Printf("Recebida mensagem desconhecida do servidor: %s\n", extRes.Type)
 	}
 }
 
+// As função abaixo para cada opção do menu atualizada para lógica de PUB/SUB
 func handleRegister(reader *bufio.Reader) {
 	fmt.Print("Digite seu nome de usuário: ")
-	username, _ := reader.ReadString('\n')
-	username = strings.TrimSpace(username)
+	usernameInput, _ := reader.ReadString('\n')
+	username = strings.TrimSpace(usernameInput)
 
 	fmt.Print("Digite sua senha: ")
 	password, _ := reader.ReadString('\n')
 	password = strings.TrimSpace(password)
 
-	data, _ := json.Marshal(map[string]string{
-		"username": username,
-		"password": password,
-	})
-
-	req := Message{
-		Request: register,
-		Data:    data,
+	req := models.AuthenticationRequest{
+		Type:               register,
+		UserId:             uid,
+		ClientReplyChannel: replyChannel,
+		Username:           username,
+		Password:           password,
 	}
-	enc.Encode(req)
+	publishRequest(AuthResquestChannel, req)
 }
 
 func handleLogin(reader *bufio.Reader) {
 	fmt.Print("Digite seu nome de usuário: ")
-	username, _ := reader.ReadString('\n')
-	username = strings.TrimSpace(username)
+	usernameInput, _ := reader.ReadString('\n')
+	username = strings.TrimSpace(usernameInput) // Armazena o username globalmente
 
 	fmt.Print("Digite sua senha: ")
 	password, _ := reader.ReadString('\n')
 	password = strings.TrimSpace(password)
 
-	data, _ := json.Marshal(map[string]string{
-		"username": username,
-		"password": password,
-	})
-
-	req := Message{
-		Request: login,
-		Data:    data,
+	req := models.AuthenticationRequest{
+		Type:               login,
+		UserId:             uid,
+		ClientReplyChannel: replyChannel,
+		Username:           username,
+		Password:           password,
 	}
-	enc.Encode(req)
+	publishRequest(AuthResquestChannel, req)
 }
 
 func handleBuyPack() {
-	data, _ := json.Marshal(map[string]string{
-		"UID": uid,
-	})
-	req := Message{
-		Request: buypack,
-		UID:     uid,
-		Data:    data,
+	req := models.PurchaseRequest{
+		UserId:             uid,
+		ClientReplyChannel: replyChannel,
 	}
-	enc.Encode(req)
+	publishRequest(BuyResquestChannel, req)
 }
 
 func handleEnqueue() {
-	data, _ := json.Marshal(map[string]string{
-		"UID": uid,
-	})
-	req := Message{
-		Request: battle,
-		UID:     uid,
-		Data:    data,
+	req := models.MatchRequest{
+		UserId:             uid,
+		ClientReplyChannel: replyChannel,
 	}
-	enc.Encode(req)
+
+	bytesReq, err := json.Marshal(req)
+	if err != nil {
+		log.Fatalf("Erro ao serializar requisição de batalha: %v", err)
+	}
+
+	extReq := models.ExternalRequest{
+		Type:   battle,
+		UserId: uid,
+		Data:   json.RawMessage(bytesReq),
+	}
+
+	publishRequest(serverChannel, extReq)
 }
 
 func handleBattleTurn() {
@@ -462,16 +518,25 @@ func handleBattleTurn() {
 	useCard(cardToPlay)
 }
 
-func useCard(card *Card) {
-	data, _ := json.Marshal(map[string]Card{
-		"card": *card,
-	})
-	req := Message{
-		Request: usecard,
-		UID:     uid,
-		Data:    data,
+func useCard(card *models.Card) {
+	req := models.NewCardRequest{
+		UserId:             uid,
+		ClientReplyChannel: replyChannel,
+		Card:               *card,
 	}
-	enc.Encode(req)
+
+	bytesReq, err := json.Marshal(req)
+	if err != nil {
+		log.Fatalf("Erro ao serializar requisição de uso de carta: %v", err)
+	}
+
+	extReq := models.ExternalRequest{
+		Type:   usecard,
+		UserId: uid,
+		Data:   json.RawMessage(bytesReq),
+	}
+
+	publishRequest(serverChannel, extReq)
 
 	matchMu.Lock()
 	defer matchMu.Unlock()
@@ -485,22 +550,144 @@ func useCard(card *Card) {
 }
 
 func giveUp() {
-	req := Message{
-		Request: giveup,
-		UID:     uid,
+	req := models.GameActionRequest{
+		Type:               giveup,
+		UserId:             uid,
+		ClientReplyChannel: replyChannel,
 	}
-	enc.Encode(req)
+
+	bytesReq, err := json.Marshal(req)
+	if err != nil {
+		log.Fatalf("Erro ao serializar requisição de desistência: %v", err)
+	}
+
+	extReq := models.ExternalRequest{
+		Type:   giveup,
+		UserId: uid,
+		Data:   json.RawMessage(bytesReq),
+	}
+
+	publishRequest(serverChannel, extReq)
 }
 
-func getOpponentUID() string {
-	matchMu.RLock()
-	defer matchMu.RUnlock()
-	for id := range matchInfo.Sanity {
-		if id != uid {
-			return id
+func handlePing() {
+	if udpPort == "" {
+		fmt.Println("❌ Porta UDP do servidor não definida. Tente logar novamente.")
+		return
+	}
+
+	serverAddr, err := net.ResolveUDPAddr("udp", udpPort)
+	if err != nil {
+		fmt.Printf("❌ erro ao resolver endereço: %v\n", err)
+		return
+	}
+
+	connection, err := net.DialUDP("udp", nil, serverAddr)
+	if err != nil {
+		fmt.Printf("❌ erro ao conectar: %v\n", err)
+		return
+	}
+	defer connection.Close()
+
+	// timeout de 999 ms
+	connection.SetReadDeadline(time.Now().Add(999 * time.Millisecond))
+
+	start := time.Now()
+	// Envia o UID como "ping"
+	_, err = connection.Write([]byte(uid))
+	if err != nil {
+		fmt.Printf("❌ erro ao enviar ping: %v\n", err)
+		return
+	}
+
+	buffer := make([]byte, 1024)
+	n, _, err := connection.ReadFromUDP(buffer)
+	if err != nil {
+		fmt.Printf("⏰ timeout: %v\n", err) // Servidor demorou > 999ms
+		return
+	}
+
+	if string(buffer[:n]) == "pong" {
+		elapsed := time.Since(start).Milliseconds()
+		fmt.Printf("🏓 latência: %d ms\n", elapsed)
+	} else {
+		fmt.Printf("❌ resposta inválida: %s\n", string(buffer[:n]))
+	}
+}
+
+// Função auxiliar para fechar canal de ping
+func stopPinger() {
+	if pingChan != nil {
+		// Fechar o canal envia um sinal para a goroutine parar
+		close(pingChan)
+		pingChan = nil
+	}
+}
+
+// Função auxiliar para forçar a voltar ao login
+func forceLogout() {
+	if !loggedIn {
+		return
+	}
+
+	loggedIn = false
+	inBattle = false
+	stopPinger() // Para a goroutine de ping
+
+	clearScreen()
+	fmt.Println("\n=============================================")
+	fmt.Println("❌ Conexão com o servidor perdida (timeout UDP).")
+	fmt.Println("Você foi desconectado. Por favor, faça login novamente.")
+	fmt.Println("=============================================")
+}
+
+// Função que checa constantemente se o servidor está ativo (HeartBeating)
+func heartBeatHandler(stopChan <-chan bool) {
+	serverAddr, err := net.ResolveUDPAddr("udp", udpPort)
+	if err != nil {
+		fmt.Println("Endereço UDP inválido, parando heartbeat.")
+		forceLogout()
+		return
+	}
+
+	for {
+		select {
+		case <-stopChan:
+			// O canal foi fechado (sinal para parar vindo do stopPinger)
+			fmt.Println("Heartbeat parado.")
+			return
+
+		case <-time.After(5 * time.Second):
+			// Espera 5 segundos antes de fazer o check
+			conn, err := net.DialUDP("udp", nil, serverAddr)
+			if err != nil {
+				// Se nem consegue "discar", o servidor caiu feio
+				forceLogout()
+				return
+			}
+
+			// Timeout de 3 segundos para a RESPOSTA
+			conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+
+			if _, err := conn.Write([]byte(uid)); err != nil {
+				conn.Close()
+				continue // Tenta de novo no próximo loop
+			}
+
+			buffer := make([]byte, 16)
+			_, _, err = conn.ReadFromUDP(buffer)
+			if err != nil {
+				// --- DETECÇÃO DE FALHA ---
+				// Servidor não respondeu em 3 segundos.
+				conn.Close()
+				forceLogout() // Desloga
+				return        // Mata esta goroutine
+			}
+
+			// Se chegou aqui, está tudo OK.
+			conn.Close()
 		}
 	}
-	return ""
 }
 
 // função que mostra inventário
@@ -515,12 +702,12 @@ func printInventory() {
 	}
 	fmt.Println("\n📦 inventário:")
 	for _, c := range inventory {
-		fmt.Printf("%s) %s\n", c.CID, strings.Title(c.Name))
+		fmt.Printf("%s) %s\n", c.CID, strings.Title(c.Name)) // Assumindo C.CID
 		fmt.Printf(" Tipo: %s\n", strings.Title(string(c.CardType)))
 		if c.Points == 0 {
 			fmt.Printf(" Pontos: %d\n", c.Points)
 		} else {
-			if c.CardType == Pill {
+			if c.CardType == models.Pill {
 				fmt.Printf(" Pontos: +%d\n", c.Points)
 			} else {
 				fmt.Printf(" Pontos: -%d\n", c.Points)
@@ -532,7 +719,8 @@ func printInventory() {
 		fmt.Println(strings.Repeat("-", 40))
 	}
 
-	time.Sleep(2 * time.Second)
+	fmt.Println("\nPressione Enter para continuar...")
+	bufio.NewReader(os.Stdin).ReadBytes('\n')
 
 }
 
@@ -551,47 +739,6 @@ func printHand() {
 	fmt.Println(strings.Repeat("=", 40))
 }
 
-// função para ping
-func testLatency() {
-	serverAddr, err := net.ResolveUDPAddr("udp", ":8081")
-	if err != nil {
-		fmt.Printf("❌ erro ao resolver endereço: %v\n", err)
-		return
-	}
-
-	connection, err := net.DialUDP("udp", nil, serverAddr)
-	if err != nil {
-		fmt.Printf("❌ erro ao conectar: %v\n", err)
-		return
-	}
-	defer connection.Close()
-
-	// timeout de 999 ms
-	connection.SetReadDeadline(time.Now().Add(999 * time.Millisecond))
-
-	start := time.Now()
-	_, err = connection.Write([]byte("ping"))
-	if err != nil {
-		fmt.Printf("❌ erro ao enviar ping: %v\n", err)
-		return
-	}
-
-	buffer := make([]byte, 1024)
-	n, _, err := connection.ReadFromUDP(buffer)
-	if err != nil {
-		fmt.Printf("⏰ timeout: %v\n", err)
-		return
-	}
-
-	if string(buffer[:n]) == "pong" {
-		elapsed := time.Since(start).Milliseconds()
-		fmt.Printf("🏓 latência: %d ms\n", elapsed)
-		time.Sleep(2 * time.Second)
-	} else {
-		fmt.Printf("❌ resposta inválida: %s\n", string(buffer[:n]))
-	}
-}
-
 func clearScreen() {
 	switch runtime.GOOS {
 	case "linux", "darwin": // Unix-like systems
@@ -603,6 +750,19 @@ func clearScreen() {
 		cmd.Stdout = os.Stdout
 		cmd.Run()
 	default:
-		fmt.Println("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n") // fallback
+		fmt.Println(strings.Repeat("\n", 50)) // fallback
+	}
+}
+
+// Função para colocar na fila do canal no redis uma requisição
+func publishRequest(channel string, payload interface{}) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Printf("❌ Erro ao codificar requisição: %v\n", err)
+		return
+	}
+
+	if err := rdb.LPush(ctx, channel, data).Err(); err != nil {
+		fmt.Printf("❌ Erro ao ENFILEIRAR  requisição: %v\n", err)
 	}
 }

@@ -1,38 +1,97 @@
-version: "3.8"
+version: '3.8'
 
 services:
-  #serviço do server
-  server:
-    build:
-      context: ./server
-    container_name: server
-    ports:
-      - "8080:8080" # tcp pro jogo normal
-      - "8081:8081/udp" # a udp que é apenas pra latência
-    networks:
-      - go-net
+  # 6 Nós Redis
+  redis-1:
+    image: redis:7-alpine
+    container_name: redis-1
+    command: redis-server --port 7000 --cluster-enabled yes --cluster-config-file /data/nodes.conf --appendonly yes
+    ports: ["7000:7000", "17000:17000"]
+    volumes: [redis-data-1:/data]
+    networks: [redis-net]
 
-  # serviço do cliente 
-  client:
-    build:
-      context: ./client
-    container_name: client
-    depends_on:
-      - server
-    networks:
-      - go-net
-    stdin_open: true # nao tirar (input funfa)
-    tty: true    
+  redis-2:
+    image: redis:7-alpine
+    container_name: redis-2
+    command: redis-server --port 7001 --cluster-enabled yes --cluster-config-file /data/nodes.conf --appendonly yes
+    ports: ["7001:7001", "17001:17001"]
+    volumes: [redis-data-2:/data]
+    networks: [redis-net]
 
-  # serviço dos bots  
-  bots:
-    build:
-      context: .
-    container_name: bots
-    depends_on:
-      - server
-    networks:
-      - go-net
-    
+  redis-3:
+    image: redis:7-alpine
+    container_name: redis-3
+    command: redis-server --port 7002 --cluster-enabled yes --cluster-config-file /data/nodes.conf --appendonly yes
+    ports: ["7002:7002", "17002:17002"]
+    volumes: [redis-data-3:/data]
+    networks: [redis-net]
+
+  redis-4:
+    image: redis:7-alpine
+    container_name: redis-4
+    command: redis-server --port 7003 --cluster-enabled yes --cluster-config-file /data/nodes.conf --appendonly yes
+    ports: ["7003:7003", "17003:17003"]
+    volumes: [redis-data-4:/data]
+    networks: [redis-net]
+
+  redis-5:
+    image: redis:7-alpine
+    container_name: redis-5
+    command: redis-server --port 7004 --cluster-enabled yes --cluster-config-file /data/nodes.conf --appendonly yes
+    ports: ["7004:7004", "17004:17004"]
+    volumes: [redis-data-5:/data]
+    networks: [redis-net]
+
+  redis-6:
+    image: redis:7-alpine
+    container_name: redis-6
+    command: redis-server --port 7005 --cluster-enabled yes --cluster-config-file /data/nodes.conf --appendonly yes
+    ports: ["7005:7005", "17005:17005"]
+    volumes: [redis-data-6:/data]
+    networks: [redis-net]
+
+  # Contêiner inicializador
+  # Ele roda, configura o cluster e para.
+  cluster-init:
+    image: redis:7-alpine
+    container_name: redis-cluster-init
+    networks: [redis-net]
+    depends_on: [redis-1, redis-2, redis-3, redis-4, redis-5, redis-6]
+    command: >
+      sh -c '
+        echo "Esperando nós Redis ficarem prontos..."
+        until redis-cli -h redis-1 -p 7000 ping | grep -q PONG; do sleep 1; done;
+        until redis-cli -h redis-2 -p 7001 ping | grep -q PONG; do sleep 1; done;
+        until redis-cli -h redis-3 -p 7002 ping | grep -q PONG; do sleep 1; done;
+        until redis-cli -h redis-4 -p 7003 ping | grep -q PONG; do sleep 1; done;
+        until redis-cli -h redis-5 -p 7004 ping | grep -q PONG; do sleep 1; done;
+        until redis-cli -h redis-6 -p 7005 ping | grep -q PONG; do sleep 1; done;
+        
+        echo "Todos os nós no ar. Verificando estado do cluster..."
+        
+        # Verifica se o cluster já está OK
+        if ! redis-cli -h redis-1 -p 7000 cluster info | grep -q "cluster_state:ok"; then
+          echo "Cluster não configurado. Criando..."
+          redis-cli --cluster create \
+            redis-1:7000 redis-2:7001 redis-3:7002 \
+            redis-4:7003 redis-5:7004 redis-6:7005 \
+            --cluster-replicas 1 \
+            --cluster-yes
+          echo "Cluster criado."
+        else
+          echo "Cluster já configurado."
+        fi
+        
+        echo "Inicialização concluída."
+      '
+volumes:
+  redis-data-1:
+  redis-data-2:
+  redis-data-3:
+  redis-data-4:
+  redis-data-5:
+  redis-data-6:
+
 networks:
-  go-net:
+  redis-net:
+    driver: bridge

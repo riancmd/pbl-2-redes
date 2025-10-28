@@ -3,8 +3,6 @@ package matches
 import (
 	"errors"
 	"pbl-2-redes/internal/models"
-
-	"github.com/google/uuid"
 )
 
 type Matches struct {
@@ -19,7 +17,7 @@ func (m Matches) GetAll() []models.Match {
 	return m.matches
 }
 
-func (m Matches) MatchExists(ID uuid.UUID) bool {
+func (m Matches) MatchExists(ID string) bool {
 	for _, v := range m.matches {
 		if v.ID == ID {
 			return true
@@ -28,7 +26,7 @@ func (m Matches) MatchExists(ID uuid.UUID) bool {
 	return false
 }
 
-func (m Matches) UserOnMatch(UID uuid.UUID) bool {
+func (m Matches) UserOnMatch(UID string) bool {
 	for _, v := range m.matches {
 		if v.P1.UID == UID {
 			return true
@@ -41,7 +39,7 @@ func (m *Matches) Add(newMatch models.Match) {
 	m.matches = append(m.matches, newMatch)
 }
 
-func (m Matches) MatchEnded(ID uuid.UUID) bool {
+func (m Matches) MatchEnded(ID string) bool {
 	for _, v := range m.matches {
 		if v.ID == ID && v.State == models.Finished {
 			return true
@@ -50,7 +48,7 @@ func (m Matches) MatchEnded(ID uuid.UUID) bool {
 	return false
 }
 
-func (m Matches) Remove(matchID uuid.UUID) error {
+func (m Matches) Remove(matchID string) error {
 	for index, match := range m.matches {
 		if match.ID == matchID {
 			m.matches = append(m.matches[:index], m.matches[(index+1):]...)

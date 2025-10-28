@@ -4,12 +4,10 @@ import (
 	"errors"
 	"log/slog"
 	"pbl-2-redes/internal/models"
-
-	"github.com/google/uuid"
 )
 
 // Retorna a fila inteira de batalha
-func (u UseCases) Battle_GetAllEnqueuedPlayers() []uuid.UUID {
+func (u UseCases) Battle_GetAllEnqueuedPlayers() []string {
 	queue := u.repos.BattleQueue.GetAll()
 	return queue
 }

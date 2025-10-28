@@ -6,8 +6,6 @@ import (
 	"pbl-2-redes/internal/repositories/matches"
 	"pbl-2-redes/internal/repositories/queue"
 	"pbl-2-redes/internal/repositories/users"
-
-	"github.com/google/uuid"
 )
 
 type Repositories struct {
@@ -27,22 +25,22 @@ type Repositories struct {
 	Match interface {
 		GetAll() []models.Match
 		Add(newMatch models.Match)
-		MatchExists(ID uuid.UUID) bool
-		UserOnMatch(UID uuid.UUID) bool
-		MatchEnded(ID uuid.UUID) bool
-		Remove(ID uuid.UUID) error
+		MatchExists(ID string) bool
+		UserOnMatch(UID string) bool
+		MatchEnded(ID string) bool
+		Remove(ID string) error
 	}
 	BattleQueue interface {
-		GetAll() []uuid.UUID
-		Enqueue(UID uuid.UUID)
+		GetAll() []string
+		Enqueue(UID string)
 		Dequeue() error
-		UserEnqueued(uuid.UUID) bool
+		UserEnqueued(string) bool
 	}
 	TradingQueue interface {
-		GetAll() []uuid.UUID
-		Enqueue(UID uuid.UUID)
+		GetAll() []string
+		Enqueue(UID string)
 		Dequeue() error
-		UserEnqueued(uuid.UUID) bool
+		UserEnqueued(string) bool
 	}
 }
 

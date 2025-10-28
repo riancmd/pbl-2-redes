@@ -23,7 +23,7 @@ func (h Handlers) battleEnqueue(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Reason: err.Error()})
+		json.NewEncoder(w).Encode(models.ErrorResponse{Type: "Erro na fila de batalha", Message: err.Error()})
 
 		return
 	}
@@ -32,7 +32,7 @@ func (h Handlers) battleEnqueue(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Reason: err.Error()})
+		json.NewEncoder(w).Encode(models.ErrorResponse{Type: "Erro na fila de batalha", Message: err.Error()})
 
 		return
 	}
@@ -45,7 +45,7 @@ func (h Handlers) battleDequeue(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Reason: err.Error()})
+		json.NewEncoder(w).Encode(models.ErrorResponse{Type: "Erro na Saída da Fila de batalha", Message: err.Error()})
 
 		return
 	}
