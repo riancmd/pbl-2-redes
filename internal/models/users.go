@@ -2,8 +2,6 @@ package models
 
 import (
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // registro do usuário em memória
@@ -20,13 +18,13 @@ type User struct {
 }
 
 type CreateUserRequest struct {
-	UID      uuid.UUID
+	UID      string
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
 type CreateUserResponse struct {
-	NewUserID   uuid.UUID `json:"newUserID"`
+	NewUserID   string    `json:"newUserID"`
 	Username    string    `json:"username"`
 	Password    string    `json:"password"`
 	Deck        []*Card   `json:"cards"`

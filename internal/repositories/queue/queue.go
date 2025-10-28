@@ -2,23 +2,21 @@ package queue
 
 import (
 	"errors"
-
-	"github.com/google/uuid"
 )
 
 type Queue struct {
-	queue []uuid.UUID
+	queue []string
 }
 
 func New() *Queue {
-	return &Queue{queue: make([]uuid.UUID, 0)}
+	return &Queue{queue: make([]string, 0)}
 }
 
-func (q Queue) GetAll() []uuid.UUID {
+func (q Queue) GetAll() []string {
 	return q.queue
 }
 
-func (q Queue) UserEnqueued(UID uuid.UUID) bool {
+func (q Queue) UserEnqueued(UID string) bool {
 	for _, v := range q.queue {
 		if v == UID {
 			return true
@@ -27,7 +25,7 @@ func (q Queue) UserEnqueued(UID uuid.UUID) bool {
 	return false
 }
 
-func (q *Queue) Enqueue(UID uuid.UUID) {
+func (q *Queue) Enqueue(UID string) {
 	q.queue = append(q.queue, UID)
 }
 
