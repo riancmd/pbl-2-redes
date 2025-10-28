@@ -8,9 +8,9 @@ import (
 
 // Trabalha com os endpoints relacionadas a fila de batalha
 func (h Handlers) registerBattleQueueEndpoints() {
-	http.HandleFunc("GET internal/battle_queue", h.getBattleQueue)
-	http.HandleFunc("POST internal/battle_queue", h.battleEnqueue)
-	http.HandleFunc("DELETE internal/battle_queue", h.battleDequeue)
+	http.HandleFunc("GET /internal/battle_queue", h.getBattleQueue)
+	http.HandleFunc("POST /internal/battle_queue", h.battleEnqueue)
+	http.HandleFunc("DELETE /internal/battle_queue", h.battleDequeue)
 }
 
 // Retorna toda a fila

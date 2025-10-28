@@ -9,9 +9,9 @@ import (
 // Possui os endpoints internal/matches com todas as partidas
 // e endpoints específicos {matchID} para cada partida
 func (h Handlers) registerMatchesEndpoints() {
-	http.HandleFunc("GET internal/matches", h.getAllMatches)
-	http.HandleFunc("PUT internal/matches/{matchID}", h.updateMatch)
-	http.HandleFunc("DELETE internal/matches/{matchID}", h.deleteMatch)
+	http.HandleFunc("GET /internal/matches", h.getAllMatches)
+	http.HandleFunc("PUT /internal/matches/{matchID}", h.updateMatch)
+	http.HandleFunc("DELETE /internal/matches/{matchID}", h.deleteMatch)
 }
 
 // Retorna todas as partidas, para atualizar

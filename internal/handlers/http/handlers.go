@@ -20,16 +20,18 @@ func New(useCases *usecases.UseCases) *Handlers {
 // Função que inicia o servidor
 // port: representa a porta onde o servidor irá ouvir
 func (h Handlers) Listen(port int) error {
-	// Possui o endpoint internal/users
+	// Possui o endpoint /internal/users
 	h.registerUserEndpoints()
-	// Possui o endpoint internal/cards e internal/cards/purchase
+	// Possui o endpoint /internal/cards e internal/cards/purchase
 	h.registerCardEndpoints()
-	// Possui o endpoint internal/battle_queue
+	// Possui o endpoint /internal/battle_queue
 	h.registerBattleQueueEndpoints()
-	// Possui o endpoint internal/trading_queue
+	// Possui o endpoint /internal/trading_queue
 	h.registerTradingQueueEndpoints()
-	// Possui o endpoint internal/matches
+	// Possui o endpoint /internal/matches
 	h.registerMatchesEndpoints()
+	// Possui o endpoint /internal/health
+	h.registerHealthEndpoints()
 
 	slog.Info("listening on", "port", port)
 

@@ -9,8 +9,8 @@ import (
 
 // Endpoints relacionados ao estoque de cartas, compra e sincronização
 func (h Handlers) registerCardEndpoints() {
-	http.HandleFunc("GET internal/cards", h.getAllCards)
-	http.HandleFunc("DELETE internal/cards/{id}", h.removeBooster)
+	http.HandleFunc("GET /internal/cards", h.getAllCards)
+	http.HandleFunc("DELETE /internal/cards/{id}", h.removeBooster)
 }
 
 // Retorna todas as cartas do estoque, para sincronização

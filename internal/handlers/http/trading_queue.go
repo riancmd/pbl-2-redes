@@ -8,9 +8,9 @@ import (
 
 // Trabalha com os endpoints relacionadas a fila de troca
 func (h Handlers) registerTradingQueueEndpoints() {
-	http.HandleFunc("GET internal/trading_queue", h.getTradingQueue)
-	http.HandleFunc("POST internal/trading_queue", h.tradingEnqueue)
-	http.HandleFunc("DELETE internal/trading_queue", h.tradingDequeue)
+	http.HandleFunc("GET /internal/trading_queue", h.getTradingQueue)
+	http.HandleFunc("POST /internal/trading_queue", h.tradingEnqueue)
+	http.HandleFunc("DELETE /internal/trading_queue", h.tradingDequeue)
 }
 
 // Retorna a fila inteira

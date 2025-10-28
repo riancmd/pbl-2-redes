@@ -7,7 +7,7 @@ import (
 
 // Endpoints relacionados ao estoque de cartas, compra e sincronização
 func (h Handlers) registerHealthEndpoints() {
-	http.HandleFunc("GET internal/health", h.getHealth)
+	http.HandleFunc("GET /internal/health", h.getHealth)
 }
 
 // Retorna todas as cartas do estoque, para sincronização

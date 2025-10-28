@@ -8,9 +8,9 @@ import (
 
 // Endpoints relacionados à lista de usuários individual de cada server
 func (h Handlers) registerUserEndpoints() {
-	http.HandleFunc("GET internal/users", h.getAllUsers)
-	http.HandleFunc("POST internal/users", h.addUser)
-	http.HandleFunc("GET internal/users{username}", h.userExists)
+	http.HandleFunc("GET /internal/users", h.getAllUsers)
+	http.HandleFunc("POST /internal/users", h.addUser)
+	http.HandleFunc("GET /internal/users{username}", h.userExists)
 }
 
 // Retorna todos os usuários (possivelmente não utilizada)
