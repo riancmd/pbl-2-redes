@@ -6,18 +6,21 @@ import (
 	"pbl-2-redes/internal/models"
 )
 
+// Trabalha com os endpoints relacionadas a fila de batalha
 func (h Handlers) registerBattleQueueEndpoints() {
-	http.HandleFunc("GET /battlequeue", h.getBattleQueue)
-	http.HandleFunc("POST /battlequeue", h.battleEnqueue)
-	http.HandleFunc("DELETE /battlequeue", h.battleDequeue)
+	http.HandleFunc("GET internal/battle_queue", h.getBattleQueue)
+	http.HandleFunc("POST internal/battle_queue", h.battleEnqueue)
+	http.HandleFunc("DELETE internal/battle_queue", h.battleDequeue)
 }
 
+// Retorna toda a fila
 func (h Handlers) getBattleQueue(w http.ResponseWriter, r *http.Request) {
 	queue := h.useCases.Battle_GetAllEnqueuedPlayers()
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(queue)
 }
 
+// Acrescenta usuário à fila
 func (h Handlers) battleEnqueue(w http.ResponseWriter, r *http.Request) {
 	var req models.User
 
@@ -40,6 +43,7 @@ func (h Handlers) battleEnqueue(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
+// Dá um pop na fila
 func (h Handlers) battleDequeue(w http.ResponseWriter, r *http.Request) {
 	err := h.useCases.Battle_Dequeue()
 

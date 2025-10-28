@@ -6,18 +6,21 @@ import (
 	"pbl-2-redes/internal/models"
 )
 
+// Endpoints relacionados à lista de usuários individual de cada server
 func (h Handlers) registerUserEndpoints() {
-	http.HandleFunc("GET /users", h.getAllUsers)
-	http.HandleFunc("POST /users", h.addUser)
-	//http.HandleFunc("DELETE /users{id}", h.deleteUser)
+	http.HandleFunc("GET internal/users", h.getAllUsers)
+	http.HandleFunc("POST internal/users", h.addUser)
+	http.HandleFunc("GET internal/users{username}", h.userExists)
 }
 
+// Retorna todos os usuários (possivelmente não utilizada)
 func (h Handlers) getAllUsers(w http.ResponseWriter, r *http.Request) {
 	users := h.useCases.GetAllUsers()
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(users)
 }
 
+// Acrescenta usuário
 func (h Handlers) addUser(w http.ResponseWriter, r *http.Request) {
 	var req models.CreateUserRequest
 
@@ -38,4 +41,17 @@ func (h Handlers) addUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
+}
+
+// Retorna se usuário existe ou não
+func (h Handlers) userExists(w http.ResponseWriter, r *http.Request) {
+	userStr := r.PathValue("username")
+	exists := h.useCases.UserExists(userStr)
+	if exists {
+		w.WriteHeader(http.StatusFound)
+
+		return
+	}
+
+	w.WriteHeader(http.StatusNotFound)
 }

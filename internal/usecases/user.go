@@ -46,3 +46,9 @@ func (u UseCases) AddUser(newUser models.CreateUserRequest) error {
 
 	return nil
 }
+
+// Verifica se usuário existe
+func (u UseCases) UserExists(username string) bool {
+	exists := u.repos.User.UserExists(username)
+	return exists
+}

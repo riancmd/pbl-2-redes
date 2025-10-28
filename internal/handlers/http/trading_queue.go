@@ -6,34 +6,50 @@ import (
 	"pbl-2-redes/internal/models"
 )
 
-// Possui os endpoints internal/matches com todas as partidas
-// e endpoints específicos {matchID} para cada partida
+// Trabalha com os endpoints relacionadas a fila de troca
 func (h Handlers) registerTradingQueueEndpoints() {
-	http.HandleFunc("GET internal/matches", h.getAllMatches)
-	http.HandleFunc("PUT internal/matches/{matchID}", h.updateMatch)
-	http.HandleFunc("DELETE internal/matches/{matchID}", h.deleteMatch)
+	http.HandleFunc("GET internal/trading_queue", h.getTradingQueue)
+	http.HandleFunc("POST internal/trading_queue", h.tradingEnqueue)
+	http.HandleFunc("DELETE internal/trading_queue", h.tradingDequeue)
 }
 
-// Retorna todas as partidas, para atualizar
-func (h Handlers) getAllMatches(w http.ResponseWriter, r *http.Request) {
-	matches := h.useCases.GetAllMatches()
+// Retorna a fila inteira
+func (h Handlers) getTradingQueue(w http.ResponseWriter, r *http.Request) {
+	queue := h.useCases.Trading_GetAllEnqueuedPlayers()
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(matches)
+	json.NewEncoder(w).Encode(queue)
 }
 
-// Atualiza uma partida em andamento
-func (h Handlers) updateMatch(w http.ResponseWriter, r *http.Request) {
-	// ajustar lógica
+// Adiciona à fila
+func (h Handlers) tradingEnqueue(w http.ResponseWriter, r *http.Request) {
+	var req models.User
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(models.ErrorResponse{Type: "Erro na fila de troca", Message: err.Error()})
+
+		return
+	}
+
+	err := h.useCases.Trading_Enqueue(req)
+
+	if err != nil {
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(models.ErrorResponse{Type: "Erro na fila de troca", Message: err.Error()})
+
+		return
+	}
+
+	w.WriteHeader(http.StatusAccepted)
 }
 
-// Finaliza partida
-func (h Handlers) deleteMatch(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("matchID")
-	err := h.useCases.EndMatch(idStr)
+// Remove da fila
+func (h Handlers) tradingDequeue(w http.ResponseWriter, r *http.Request) {
+	err := h.useCases.Trading_Dequeue()
 
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Type: "couldn't end match", Message: err.Error()})
+		json.NewEncoder(w).Encode(models.ErrorResponse{Type: "Erro na saída da fila de troca", Message: err.Error()})
 
 		return
 	}

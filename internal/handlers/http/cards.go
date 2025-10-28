@@ -7,17 +7,20 @@ import (
 	"strconv"
 )
 
+// Endpoints relacionados ao estoque de cartas, compra e sincronização
 func (h Handlers) registerCardEndpoints() {
-	http.HandleFunc("GET /cards", h.getAllCards)
-	http.HandleFunc("DELETE /cards/{id}", h.removeBooster)
+	http.HandleFunc("GET internal/cards", h.getAllCards)
+	http.HandleFunc("DELETE internal/cards/{id}", h.removeBooster)
 }
 
+// Retorna todas as cartas do estoque, para sincronização
 func (h Handlers) getAllCards(w http.ResponseWriter, r *http.Request) {
 	cards := h.useCases.GetAllCards()
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(cards)
 }
 
+// Remove um Booster do estoque a pedido do líder
 func (h Handlers) removeBooster(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 
