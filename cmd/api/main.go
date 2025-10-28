@@ -49,7 +49,8 @@ func main() {
 
 	go h.Listen(port) // Roda na porta especificada
 
-	if client.bullyElection.isLeader() {
+	// Se for o líder, vai criar o banco de cartas
+	if client.IsLeader() {
 		// Atualização do banco de dados
 		err = useCases.AddCardsFromFile("../../internal/data/cardVault.json", 100000)
 	}

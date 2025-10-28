@@ -1,20 +1,22 @@
 package cluster
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"pbl-2-redes/internal/infrastructure/bully"
 	"pbl-2-redes/internal/models"
 	"strconv"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // Representa o Client (outbound) daquele servidor específico dentro do Cluster
 type Client struct {
 	peers         []int
-	bullyElection *bully.bullyElection // erro no package por algum motivo [CONSERTAR]
+	bullyElection *bully.BullyElection // erro no package por algum motivo [CONSERTAR]
 	httpClient    *http.Client
 }
 
@@ -37,16 +39,21 @@ func New(allPeers []int, port int) *Client {
 	}
 
 	// Faz eleição
-	client.bullyElection.startElection()
+	client.bullyElection.StartElection()
 
 	return &client
 }
 
+// Verifica se é líder (uso externo)
+func (c *Client) IsLeader() bool {
+	return c.bullyElection.IsLeader()
+}
+
 // Faz a sincronização do banco de dados
-// Usado no início, pelo líder
+// Usado no início, pelos seguidores
 func (c *Client) SyncCards() ([]models.Booster, error) {
 	// dá um GET nas cartas
-	resp, err := c.httpClient.Get("http://localhost:" + strconv.Itoa(c.peers[0]) + "/cards") // Endereço temporário, resolver
+	resp, err := c.httpClient.Get("http://localhost:" + strconv.Itoa(c.bullyElection.GetLeader()) + "/internal/cards") // Endereço temporário, resolver
 
 	if err != nil {
 		return nil, err
@@ -61,7 +68,39 @@ func (c *Client) SyncCards() ([]models.Booster, error) {
 }
 
 // Sincroniza o enqueue na fila de batalha
-func (c *Client) BattleEnqueue(UID uuid.UUID) error {
+func (c *Client) BattleEnqueue(UID string) error {
+	// Encapsula dados em JSON
+	jsonData, err := json.Marshal(UID)
+
+	if err != nil {
+		log.Fatalf("error while converting to json: %v", err)
+	}
+	// Dá um POST na queue
+	resp, err := c.httpClient.Post(
+		"http://localhost:"+strconv.Itoa(c.bullyElection.GetLeader())+"/internal/battle_queue",
+		"application/json",
+		bytes.NewBuffer(jsonData)) // Endereço temporário, resolver
+
+	if err != nil {
+		return err
+	}
+
+	defer resp.Body.Close()
+
+	// Verifica o código enviado de resposta
+	if resp.StatusCode != http.StatusAccepted {
+
+		// Lê o erro
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			// Se não conseguir ler o corpo, retorne pelo menos o status
+			return fmt.Errorf("couldn't read message: status %s", resp.Status)
+		}
+
+		// Retorna o erro
+		return fmt.Errorf("status: %s. msg: %s", resp.Status, string(bodyBytes))
+	}
+
 	return nil
 }
 
@@ -71,7 +110,7 @@ func (c *Client) BattleDequeue() error {
 }
 
 // Sincroniza o enqueue na fila de troca
-func (c *Client) TradingEnqueue(UID uuid.UUID) error {
+func (c *Client) TradingEnqueue(UID string) error {
 	return nil
 }
 
@@ -86,7 +125,7 @@ func (c *Client) MatchNew(match models.Match) error {
 }
 
 // Sincroniza fim de batalha
-func (c *Client) MatchEnd(ID uuid.UUID) error {
+func (c *Client) MatchEnd(ID string) error {
 	return nil
 }
 
@@ -96,16 +135,14 @@ func (c *Client) BuyBooster(boosterID int) error {
 }
 
 // Sincroniza troca de carta
-func (c *Client) TradeCard() error {
-	leader := c.bullyElection.isLeader()
+func (c *Client) TradeCard(action string, info string, card models.Card) error {
+	leader := c.bullyElection.IsLeader()
 	if leader {
 		c.BroadcastToPeers(action, info)
 		return nil
 	}
-	else {
-		err := c.AskLeader(action, info)
-	}
-	return nil
+	err := c.AskLeader(action, info)
+	return err
 }
 
 // Sincroniza criação de usuários, evitando cópias
@@ -120,5 +157,10 @@ func (c *Client) AskLeader(action string, info string) error {
 
 // Ordena aos peers que façam algo
 func (c *Client) BroadcastToPeers(action string, info string) error {
+	return nil
+}
+
+// Atualiza partida
+func (c *Client) UpdateMatch(match models.Match) error {
 	return nil
 }

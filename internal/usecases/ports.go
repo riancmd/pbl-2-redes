@@ -27,6 +27,6 @@ type ClusterSync interface {
 	// Sincroniza criação de usuários, para não permitir cópias
 	UserNew(username string) error
 	// Atualiza partida
-	UpdateMatch(match models.Match)
+	UpdateMatch(match models.Match) error
 	//..........
 }

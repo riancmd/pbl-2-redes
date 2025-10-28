@@ -12,15 +12,15 @@ const (
 )
 
 // Responsável pela lógica de eleição e sincronização entre servers
-type bullyElection struct {
+type BullyElection struct {
 	serverID int   // Por enquanto, é a porta do servidor
 	leaderID int   // ID do líder
 	peers    []int // IDs dos outros servidores
 	state    int   // pode estar em eleição ou pós-eleição
 }
 
-func New(serverID int, peers []int) *bullyElection {
-	return &bullyElection{
+func New(serverID int, peers []int) *BullyElection {
+	return &BullyElection{
 		serverID: serverID,
 		leaderID: 0,
 		peers:    peers,
@@ -29,15 +29,17 @@ func New(serverID int, peers []int) *bullyElection {
 }
 
 // Verifica se é líder
-func (b *bullyElection) isLeader() bool {
-	if b.leaderID == b.serverID {
-		return true
-	}
-	return false
+func (b *BullyElection) IsLeader() bool {
+	return b.leaderID == b.serverID
 }
 
-// Modificar líder
-func (b *bullyElection) setLeader(newLeader int) error {
+// Retorna líder
+func (b *BullyElection) GetLeader() int {
+	return b.leaderID
+}
+
+// Modificar líder (função interna)
+func (b *BullyElection) SetLeader(newLeader int) error {
 	// Verifica se peer realmente existe
 	for _, peerID := range b.peers {
 		if newLeader == peerID {
@@ -50,12 +52,12 @@ func (b *bullyElection) setLeader(newLeader int) error {
 }
 
 // Modificar estado para pós eleição
-func (b *bullyElection) endElection() {
+func (b *BullyElection) endElection() {
 	b.state = postElection
 }
 
 // Verifica os IDs
-func (b *bullyElection) startElection() {
+func (b *BullyElection) StartElection() {
 	b.state = inElection
 	var leaderID int
 	leaderID = b.serverID
@@ -65,11 +67,11 @@ func (b *bullyElection) startElection() {
 		}
 	}
 
-	b.setLeader(leaderID)
+	b.SetLeader(leaderID)
 	b.endElection()
 }
 
 // Torna sem líder
-func (b *bullyElection) setLeaderless() {
+func (b *BullyElection) SetLeaderless() {
 	b.state = leaderless
 }

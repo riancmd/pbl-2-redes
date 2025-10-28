@@ -22,7 +22,7 @@ func (h Handlers) getBattleQueue(w http.ResponseWriter, r *http.Request) {
 
 // Acrescenta usuário à fila
 func (h Handlers) battleEnqueue(w http.ResponseWriter, r *http.Request) {
-	var req models.User
+	var req string
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)

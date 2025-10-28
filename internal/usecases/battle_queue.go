@@ -3,7 +3,6 @@ package usecases
 import (
 	"errors"
 	"log/slog"
-	"pbl-2-redes/internal/models"
 )
 
 // Retorna a fila inteira de batalha
@@ -13,23 +12,23 @@ func (u UseCases) Battle_GetAllEnqueuedPlayers() []string {
 }
 
 // Coloca na filha de batalha
-func (u UseCases) Battle_Enqueue(user models.User) error {
-	enqueued := u.repos.BattleQueue.UserEnqueued(user.UID)
+func (u UseCases) Battle_Enqueue(UID string) error {
+	enqueued := u.repos.BattleQueue.UserEnqueued(UID)
 
 	if enqueued {
-		slog.Error("this user is already enqueued", "username", user.Username)
+		slog.Error("this user is already enqueued")
 		return errors.New("user is already enqueued")
 	}
 
 	// Sincroniza entre servidores
-	err := u.sync.BattleEnqueue(user.UID)
+	err := u.sync.BattleEnqueue(UID)
 
 	if err != nil {
-		slog.Error("this user is already enqueued", "username", user.Username)
+		slog.Error("this user is already enqueued")
 		return err
 	}
 
-	u.repos.BattleQueue.Enqueue(user.UID)
+	u.repos.BattleQueue.Enqueue(UID)
 
 	return nil
 }
