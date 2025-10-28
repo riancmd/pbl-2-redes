@@ -37,6 +37,7 @@ func (c *Client) BattleEnqueue(UID string) error {
 
 	if err != nil {
 		log.Fatalf("error while converting to json: %v", err)
+		return err
 	}
 	// Dá um POST na queue
 	resp, err := c.httpClient.Post(
@@ -102,6 +103,7 @@ func (c *Client) TradingEnqueue(UID string) error {
 
 	if err != nil {
 		log.Fatalf("error while converting to json: %v", err)
+		return err
 	}
 	// Dá um POST na queue
 	resp, err := c.httpClient.Post(
@@ -167,10 +169,11 @@ func (c *Client) MatchNew(match models.Match) error {
 
 	if err != nil {
 		log.Fatalf("error while converting to json: %v", err)
+		return err
 	}
 	// Dá um POST na queue
 	resp, err := c.httpClient.Post(
-		"http://localhost:"+strconv.Itoa(c.bullyElection.GetLeader())+"/internal/battle_queue",
+		"http://localhost:"+strconv.Itoa(c.bullyElection.GetLeader())+"/internal/matches{"+match.ID+"}",
 		"application/json",
 		bytes.NewBuffer(jsonData)) // Endereço temporário, resolver
 
@@ -181,17 +184,12 @@ func (c *Client) MatchNew(match models.Match) error {
 	defer resp.Body.Close()
 
 	// Verifica o código enviado de resposta
-	if resp.StatusCode != http.StatusAccepted {
+	if resp.StatusCode == http.StatusConflict {
+		return errors.New("user is already on a match")
+	}
 
-		// Lê o erro
-		bodyBytes, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-			// Se não conseguir ler o corpo, retorna pelo menos o status
-			return fmt.Errorf("couldn't read message: status %s", resp.Status)
-		}
-
-		// Retorna o erro
-		return fmt.Errorf("status: %s. msg: %s", resp.Status, string(bodyBytes))
+	if resp.StatusCode == http.StatusBadRequest {
+		return errors.New("bad request")
 	}
 
 	return nil
@@ -199,36 +197,88 @@ func (c *Client) MatchNew(match models.Match) error {
 
 // Sincroniza fim de batalha
 func (c *Client) MatchEnd(ID string) error {
+	// Crio a request com HTTP
+	req, err := http.NewRequest(
+		http.MethodDelete,
+		"http://localhost:"+strconv.Itoa(c.bullyElection.GetLeader())+"/internal/trading_queue",
+		nil)
+
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.Do(req)
+
+	if err != nil {
+		return err
+	}
+
+	defer resp.Body.Close()
+
+	// Verifica a resposta
+	if resp.StatusCode == http.StatusNotFound {
+		return errors.New("user was already out of the queue")
+	}
+
 	return nil
 }
 
 // Sincroniza compra de carta
 func (c *Client) BuyBooster(boosterID int) error {
+	// Encapsula o dado com JSON
+	jsonData, err := json.Marshal(boosterID)
+
+	if err != nil {
+		return err
+	}
+
+	// Crio a request com HTTP
+	req, err := http.NewRequest(
+		http.MethodDelete,
+		"http://localhost:"+strconv.Itoa(c.bullyElection.GetLeader())+"/internal/cards/{"+strconv.Itoa(boosterID)+"}",
+		bytes.NewBuffer(jsonData))
+
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.Do(req)
+
+	if err != nil {
+		return err
+	}
+
+	defer resp.Body.Close()
+
+	// Verifica a resposta
+	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusNotFound {
+		return errors.New("booster doesn't exist")
+	}
+
 	return nil
 }
 
 // Sincroniza troca de carta
-func (c *Client) TradeCard(action string, info string, card models.Card) error {
-	leader := c.bullyElection.IsLeader()
-	if leader {
-		c.BroadcastToPeers(action, info)
-		return nil
-	}
-	err := c.AskLeader(action, info)
-	return err
+func (c *Client) TradeCard(p1, p2 string, card models.Card) error {
+	// falta organizar a logica
+	return nil
 }
 
 // Sincroniza criação de usuários, evitando cópias
 func (c *Client) UserNew(username string) error {
-	return nil
-}
+	// dá um GET, verificando se user existe
+	resp, err := c.httpClient.Get(
+		"http://localhost:" + strconv.Itoa(c.bullyElection.GetLeader()) + "/internal/users{" + username + "}") // Endereço temporário, resolver
 
-// Solicita ao líder permissão
-func (c *Client) AskLeader(action string, info string) error {
-	return nil
-}
+	if err != nil {
+		return err
+	}
 
-// Atualiza partida
-func (c *Client) UpdateMatch(match models.Match) error {
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusFound {
+		return errors.New("user already exists")
+	}
+
 	return nil
 }

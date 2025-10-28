@@ -10,7 +10,7 @@ import (
 // e endpoints específicos {matchID} para cada partida
 func (h Handlers) registerMatchesEndpoints() {
 	http.HandleFunc("GET /internal/matches", h.getAllMatches)
-	http.HandleFunc("POST /internal/matches/{matchID}", h.addMatch)
+	http.HandleFunc("POST /internal/matches/{matchID}", h.addMatch) // Manter ou não?
 	http.HandleFunc("PUT /internal/matches/{matchID}", h.updateMatch)
 	http.HandleFunc("DELETE /internal/matches/{matchID}", h.deleteMatch)
 }
@@ -28,7 +28,7 @@ func (h Handlers) addMatch(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(models.ErrorResponse{Type: "Erro na criação de partida", Message: err.Error()})
+		json.NewEncoder(w).Encode(models.ErrorResponse{Type: "Erro na decodificação", Message: err.Error()})
 
 		return
 	}
@@ -36,7 +36,7 @@ func (h Handlers) addMatch(w http.ResponseWriter, r *http.Request) {
 	err := h.useCases.AddMatch(*req.P1, *req.P2)
 
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusConflict)
 		json.NewEncoder(w).Encode(models.ErrorResponse{Type: "Erro na adição de usuário", Message: err.Error()})
 
 		return
@@ -45,6 +45,7 @@ func (h Handlers) addMatch(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
+// Manter ou não?
 // Atualiza uma partida em andamento
 func (h Handlers) updateMatch(w http.ResponseWriter, r *http.Request) {
 	// ajustar lógica
