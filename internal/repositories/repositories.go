@@ -14,6 +14,7 @@ type Repositories struct {
 		Add(newUser models.User)
 		UserExists(user string) bool
 		CheckPassword(usern string, password string) (bool, error)
+		SwitchCard(UID, CID string, card models.Card) error
 	}
 	Card interface {
 		GetAll() []models.Booster

@@ -38,3 +38,22 @@ func (u *Users) CheckPassword(usern string, password string) (bool, error) {
 	}
 	return false, errors.New("password incorrect")
 }
+
+func (u *Users) SwitchCard(UID, CID string, newCard models.Card) error {
+	i := 0
+
+	for _, user := range u.users {
+		if user.UID == UID {
+			for _, card := range user.Deck {
+				i++
+				if card.CID == CID {
+					user.Deck[i] = &newCard
+					return nil
+				}
+			}
+		}
+	}
+
+	return errors.New("card doesn't exist")
+
+}

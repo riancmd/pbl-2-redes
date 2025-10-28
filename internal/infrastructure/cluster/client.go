@@ -97,10 +97,28 @@ func (c *Client) BuyBooster(boosterID int) error {
 
 // Sincroniza troca de carta
 func (c *Client) TradeCard() error {
+	leader := c.bullyElection.isLeader()
+	if leader {
+		c.BroadcastToPeers(action, info)
+		return nil
+	}
+	else {
+		err := c.AskLeader(action, info)
+	}
 	return nil
 }
 
 // Sincroniza criação de usuários, evitando cópias
 func (c *Client) UserNew(username string) error {
+	return nil
+}
+
+// Solicita ao líder permissão
+func (c *Client) AskLeader(action string, info string) error {
+	return nil
+}
+
+// Ordena aos peers que façam algo
+func (c *Client) BroadcastToPeers(action string, info string) error {
 	return nil
 }

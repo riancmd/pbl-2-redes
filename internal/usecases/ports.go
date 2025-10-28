@@ -23,7 +23,7 @@ type ClusterSync interface {
 	// Sincroniza compra de carta
 	BuyBooster(boosterID int) error
 	// Sincroniza troca de carta
-	TradeCard() error
+	TradeCard(UID, CID string, card models.Card) error
 	// Sincroniza criação de usuários, para não permitir cópias
 	UserNew(username string) error
 	// Atualiza partida
