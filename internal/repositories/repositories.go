@@ -13,6 +13,7 @@ type Repositories struct {
 		GetAll() []models.User
 		Add(newUser models.User)
 		UserExists(user string) bool
+		CheckPassword(usern string, password string) (bool, error)
 	}
 	Card interface {
 		GetAll() []models.Booster

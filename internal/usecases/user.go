@@ -13,7 +13,7 @@ func (u UseCases) GetAllUsers() []models.User {
 	return users
 }
 
-// Acrescenta novo usuário
+// Acrescenta novo usuário na lista de usuários do servidor
 func (u UseCases) AddUser(newUser models.CreateUserRequest) error {
 	exists := u.repos.User.UserExists(newUser.Username)
 
@@ -51,4 +51,15 @@ func (u UseCases) AddUser(newUser models.CreateUserRequest) error {
 func (u UseCases) UserExists(username string) bool {
 	exists := u.repos.User.UserExists(username)
 	return exists
+}
+
+// Faz login em usuário
+func (u UseCases) Login(user string, password string) (bool, error) {
+	login, err := u.repos.User.CheckPassword(user, password)
+
+	if !login {
+		return false, err
+	}
+
+	return true, nil
 }

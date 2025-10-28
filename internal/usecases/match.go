@@ -76,3 +76,9 @@ func (u UseCases) EndMatch(ID string) error {
 
 	return nil
 }
+
+// Atualizar partida
+func (u UseCases) UpdateMatch(match models.Match) error {
+	u.sync.UpdateMatch(match)
+	return nil
+}
