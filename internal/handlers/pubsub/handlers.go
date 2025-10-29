@@ -34,6 +34,7 @@ const (
 	newtie        string = "newTie"
 	pong          string = "pong"
 	errorResponse string = "error"
+	tradeEnqueued string = "tradeEnqueued"
 )
 
 type PubSubHandlers struct {
@@ -149,35 +150,59 @@ func (h *PubSubHandlers) processAuth(payload string) {
 
 	slog.Info("Processando trabalho. Tipo: %s. Id: %s", req.Type, req.UserId)
 
-	//Penso que aqui seria a lógica de esperar a resposta do cluster de servers
-	status := true //Mudar aqui
-
 	var responseData models.AuthResponse
 	var responseType string
 	var processingError error
+
 	switch req.Type {
 	case "register":
-		processingError = nil
+
+		userRequest := models.CreateUserRequest{
+			UID:      req.UserId,
+			Username: req.Username,
+			Password: req.Password,
+		}
+
+		//Usa função criada na camada de UseCases para processar a requisição dentro do cluster de servidores
+		processingError = h.useCases.AddUser(userRequest)
+
+		status := true
+		message := "Registrado com sucesso"
+
+		if processingError != nil {
+			status = false
+			message = "Não foi possível fazer cadastro"
+		}
 
 		responseData = models.AuthResponse{
 			Status:        status,
 			Username:      req.Username,
 			UDPPort:       h.udpPort,     // Porta UDP do server
 			ServerChannel: h.serverQueue, // Fila pessoal para simular conexão a server que tratou cliente
-			Message:       "Registrado com sucesso!",
+			Message:       message,
 		}
+
 		responseType = registered
 
 	case "login":
-		processingError = nil
+
+		//Usa função criada na camada de UseCases para processar a requisição dentro do cluster de servidores
+		status, err := h.useCases.Login(req.Username, req.Password)
+		processingError = err
+
+		message := "Sucesso no Login"
+		if processingError != nil {
+			message = "Não foi possível fazer login"
+		}
 
 		responseData = models.AuthResponse{
 			Status:        status,
 			Username:      req.Username,
 			UDPPort:       h.udpPort,     // Porta UDP do server
 			ServerChannel: h.serverQueue, // Fila pessoal para simular conexão a server que tratou cliente
-			Message:       "Login bem-sucedido!",
+			Message:       message,
 		}
+
 		responseType = loggedin
 
 	default:
@@ -210,24 +235,11 @@ func (h *PubSubHandlers) processBuy(payload string) {
 
 	slog.Info("Processando trabalho [Buy]", "user", req.UserId)
 
-	//Penso que aqui seria a lógica de esperar a resposta do cluster de servers
-	status := true //Mudar aqui
-	booster, err := h.useCases.GetBooster()
-
 	var responseData models.ClientPurchaseResponse
 	var responseType string = packbought
-	var processingError error
 
-	if err != nil {
-		processingError = err // Captura o erro do usecase
-	} else {
-		// Prepara a resposta de SUCESSO
-		responseData = models.ClientPurchaseResponse{
-			Status:           status,
-			Message:          "Compra realizada!",
-			BoosterGenerated: booster,
-		}
-	}
+	//Usa função criada na camada de UseCases para processar a requisição dentro do cluster de servidores
+	booster, processingError := h.useCases.GetBooster()
 
 	// Envia a  resposta
 	if processingError != nil { //Erro
@@ -240,6 +252,12 @@ func (h *PubSubHandlers) processBuy(payload string) {
 
 		h.sendResponse(req.ClientReplyChannel, req.UserId, errorResponse, errResp)
 	} else { //Sucesso
+		responseData = models.ClientPurchaseResponse{
+			Status:           true,
+			Message:          "Compra realizada!",
+			BoosterGenerated: booster,
+		}
+
 		h.sendResponse(req.ClientReplyChannel, req.UserId, responseType, responseData)
 	}
 }
@@ -279,14 +297,18 @@ func (h *PubSubHandlers) processServerPersonal(payload string) {
 			break
 		}
 
-		//Mudar aqui a lógica de enviar para os servers
-
-		err := h.useCases.Battle_Enqueue(models.User{})
+		//Usa função criada na camada de UseCases para processar a requisição dentro do cluster de servidores
+		err := h.useCases.Battle_Enqueue(req.UserId)
 
 		if err != nil {
 			processingError = err
 		} else {
-			responseData = models.Match{} //Mudar aqui tbm
+			responseData = models.MatchResponse{
+				Type:    enqueued,
+				Status:  true,
+				Message: "Entrou na fila",
+			}
+
 			responseType = enqueued
 		}
 
@@ -308,14 +330,13 @@ func (h *PubSubHandlers) processServerPersonal(payload string) {
 
 		replyChannel = req.ClientReplyChannel
 
-		//Mudar lógica aqui
-
-		err := h.useCases.Trading_Enqueue(models.User{})
+		//Usa função criada na camada de UseCases para processar a requisição dentro do cluster de servidores
+		err := h.useCases.Trading_Enqueue(req.UserId)
 
 		if err != nil {
 			processingError = err
 		} else {
-			responseData = models.TradeResponse{} //Mudar aqui
+			responseData = models.TradeResponse{}
 			responseType = enqueued
 		}
 

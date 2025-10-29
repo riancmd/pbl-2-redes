@@ -79,7 +79,7 @@ type MatchResponse struct {
 type ClientPurchaseResponse struct {
 	Status           bool    `json:"status"`
 	Message          string  `json:"message"`
-	BoosterGenerated Booster `json:"booster"`
+	BoosterGenerated Booster `json:"boosterGenerated"`
 }
 
 // Resposta para trocas de cartas (pareamento ou não / solicitação de envio de nova carta)

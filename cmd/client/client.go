@@ -62,22 +62,24 @@ const (
 	usecard  string = "useCard"
 	giveup   string = "giveUp"
 	ping     string = "ping"
+	trade    string = "trade"
 
 	//Tipos de respostas
-	registered string = "registered"
-	loggedin   string = "loggedIn"
-	packbought string = "packBought"
-	enqueued   string = "enqueued"
-	gamestart  string = "gameStart"
-	cardused   string = "cardUsed"
-	notify     string = "notify"
-	updateinfo string = "updateInfo"
-	newturn    string = "newTurn"
-	newloss    string = "newLoss"
-	newvictory string = "newVictory"
-	newtie     string = "newTie"
-	pong       string = "pong"
-	error      string = "error"
+	registered    string = "registered"
+	loggedin      string = "loggedIn"
+	packbought    string = "packBought"
+	enqueued      string = "enqueued"
+	gamestart     string = "gameStart"
+	cardused      string = "cardUsed"
+	notify        string = "notify"
+	updateinfo    string = "updateInfo"
+	newturn       string = "newTurn"
+	newloss       string = "newLoss"
+	newvictory    string = "newVictory"
+	newtie        string = "newTie"
+	pong          string = "pong"
+	error         string = "error"
+	tradeEnqueued string = "tradeEnqueued"
 
 	//Tipos de canais para dar Publish
 	AuthResquestChannel string = "AuthResquestChannel"
@@ -216,9 +218,10 @@ func showMenu() {
 			fmt.Println("3. Comprar booster")
 			fmt.Println("4. Ver inventário")
 			fmt.Println("5. Batalhar")
-			fmt.Println("6. Ping")
+			fmt.Println("6. Trocar")
+			fmt.Println("7. Ping")
 		}
-		fmt.Println("7. Sair")
+		fmt.Println("8. Sair")
 		fmt.Print("Escolha uma opção: ")
 
 		input, _ := reader.ReadString('\n')
@@ -246,8 +249,14 @@ func showMenu() {
 				handleEnqueue()
 			}
 		case "6":
-			handlePing()
+			if loggedIn {
+				handleTradeEnqueue()
+			}
 		case "7":
+			if loggedIn {
+				handlePing()
+			}
+		case "8":
 			fmt.Println("💤 Bons sonhos...")
 			stopPinger()
 			return
@@ -320,9 +329,15 @@ func handleResponse(extRes models.ExternalResponse) {
 		}
 
 	case enqueued:
+
 		var matchResp models.MatchResponse
 		json.Unmarshal(extRes.Data, &matchResp)
 		fmt.Printf("⏳ %s\n", matchResp.Message)
+
+	case tradeEnqueued:
+		var tradeResp models.TradeResponse
+		json.Unmarshal(extRes.Data, &tradeResp)
+		fmt.Printf("⏳ %s\n", tradeResp.Message)
 
 	case gamestart:
 		var payload models.PayLoad
@@ -484,6 +499,32 @@ func handleEnqueue() {
 	}
 
 	publishRequest(serverChannel, extReq)
+}
+
+// Função nova para troca
+func handleTradeEnqueue() {
+	if serverChannel == "" {
+		fmt.Println("❌ Canal do servidor não definido. Tente logar novamente.")
+		return
+	}
+	req := models.TradeRequest{ // <-- Usa TradeRequest
+		UserId:             uid,
+		ClientReplyChannel: replyChannel,
+	}
+
+	bytesReq, err := json.Marshal(req)
+	if err != nil {
+		fmt.Printf("❌ Erro ao serializar requisição de troca: %v\n", err)
+		return
+	}
+
+	extReq := models.ExternalRequest{
+		Type:   trade, // <-- Tipo 'trade'
+		UserId: uid,
+		Data:   json.RawMessage(bytesReq),
+	}
+
+	publishRequest(serverChannel, extReq) // <-- Envia para fila PESSOAL do servidor
 }
 
 func handleBattleTurn() {
