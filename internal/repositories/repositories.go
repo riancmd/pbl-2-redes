@@ -33,18 +33,23 @@ type Repositories struct {
 		UserOnMatch(UID string) bool
 		MatchEnded(ID string) bool
 		Remove(ID string) error
+		Length() int
 	}
 	BattleQueue interface {
 		GetAll() []string
 		Enqueue(UID string)
 		Dequeue() error
+		GetDequeuedPlayers() (string, string)
 		UserEnqueued(string) bool
+		Length() int
 	}
 	TradingQueue interface {
 		GetAll() []string
 		Enqueue(UID string)
 		Dequeue() error
+		GetDequeuedPlayers() string
 		UserEnqueued(string) bool
+		Length() int
 	}
 }
 

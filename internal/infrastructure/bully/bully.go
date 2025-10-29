@@ -28,6 +28,10 @@ func New(serverID int, peers []int) *BullyElection {
 	}
 }
 
+func (b *BullyElection) GetServerID() int {
+	return b.serverID
+}
+
 // Verifica se é líder
 func (b *BullyElection) IsLeader() bool {
 	return b.leaderID == b.serverID

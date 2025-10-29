@@ -16,6 +16,10 @@ func (q Queue) GetAll() []string {
 	return q.queue
 }
 
+func (q Queue) GetDequeuedPlayers() (string, string) {
+	return q.queue[0], q.queue[1]
+}
+
 func (q Queue) UserEnqueued(UID string) bool {
 	for _, v := range q.queue {
 		if v == UID {
@@ -35,4 +39,8 @@ func (q *Queue) Dequeue() error {
 		return nil
 	}
 	return errors.New("queue is empty")
+}
+
+func (q *Queue) Length() int {
+	return len(q.queue)
 }

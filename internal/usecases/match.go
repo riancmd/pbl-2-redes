@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"pbl-2-redes/internal/models"
+	"time"
 )
 
 // Retorna repositório contendo todas as partidas
@@ -93,6 +94,45 @@ func (u *UseCases) EndMatch(ID string) error {
 	}
 
 	return nil
+}
+
+// Goroutine responsável por ouvir se existem batalhas
+func (u *UseCases) CheckNewMatches() {
+	managedMatches := make(map[string]bool, 0)
+	allMatches := []models.Match{}
+
+	// loop de verificação
+	for {
+		time.Sleep(50 * time.Millisecond)
+		allMatches = u.repos.Match.GetAll()
+
+		// se tiver mais de uma partida, passa pela lista
+		if u.repos.Match.Length() >= 1 {
+			// para cada partida, se for minha partida E não estiver gerenciada, gerencio
+			for _, match := range allMatches {
+				if match.ServerID != u.sync.GetServerID() {
+					continue
+				}
+				u.matchesMU.Lock()
+				// se tiver sendo gerenciada já
+				if managedMatches[match.ID] {
+					u.matchesMU.Unlock()
+					continue
+				}
+				slog.Error("new match found")
+				managedMatches[match.ID] = true
+
+				u.matchesMU.Unlock()
+
+				go u.ManageMatch(match)
+			}
+		}
+	}
+}
+
+// Gerencia a partida
+func (u *UseCases) ManageMatch(match models.Match) error {
+
 }
 
 // Atualizar partida

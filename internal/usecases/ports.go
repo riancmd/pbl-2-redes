@@ -34,4 +34,6 @@ type ClusterSync interface {
 	GetHand(UID string) ([]*models.Card, error)
 	// Verifica se é líder
 	IsLeader() bool
+	// Pego ID do server
+	GetServerID() int
 }

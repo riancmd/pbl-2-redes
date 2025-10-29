@@ -61,3 +61,7 @@ func (m Matches) Remove(matchID string) error {
 func (m Matches) UpdateMatch(match models.Match) error {
 	return nil
 }
+
+func (m Matches) Length() int {
+	return len(m.matches)
+}

@@ -41,3 +41,8 @@ func New(allPeers []int, port int) *Client {
 func (c *Client) AmILeader() bool {
 	return c.bullyElection.IsLeader()
 }
+
+// Pego meu ID
+func (c *Client) GetMyID() int {
+	return c.bullyElection.GetServerID()
+}
