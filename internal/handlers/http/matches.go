@@ -10,7 +10,7 @@ import (
 // e endpoints específicos {matchID} para cada partida
 func (h Handlers) registerMatchesEndpoints() {
 	http.HandleFunc("GET /internal/matches", h.getAllMatches)
-	http.HandleFunc("POST /internal/matches/{matchID}", h.addMatch) // Manter ou não?
+	http.HandleFunc("POST /internal/matches/{matchID}", h.addMatch) // Endpoint de matchmake
 	http.HandleFunc("PUT /internal/matches/{matchID}", h.updateMatch)
 	http.HandleFunc("DELETE /internal/matches/{matchID}", h.deleteMatch)
 }
@@ -24,7 +24,7 @@ func (h Handlers) getAllMatches(w http.ResponseWriter, r *http.Request) {
 
 // Acrescenta nova partida
 func (h Handlers) addMatch(w http.ResponseWriter, r *http.Request) {
-	var req models.Match
+	var req models.MatchInitialRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -33,7 +33,7 @@ func (h Handlers) addMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.useCases.AddMatch(*req.P1, *req.P2)
+	err := h.useCases.AddMatch(req)
 
 	if err != nil {
 		w.WriteHeader(http.StatusConflict)

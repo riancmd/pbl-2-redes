@@ -11,6 +11,8 @@ func (h Handlers) registerUserEndpoints() {
 	http.HandleFunc("GET /internal/users", h.getAllUsers)
 	http.HandleFunc("POST /internal/users", h.addUser)
 	http.HandleFunc("GET /internal/users{username}", h.userExists)
+	http.HandleFunc("GET /internal/users{uid}", h.uidExists)
+	http.HandleFunc("GET /internal/users/{uid}/hand", h.getHand)
 }
 
 // Retorna todos os usuários (possivelmente não utilizada)
@@ -54,4 +56,42 @@ func (h Handlers) userExists(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNotFound)
+}
+
+// Retorna se usuário existe ou não
+func (h Handlers) uidExists(w http.ResponseWriter, r *http.Request) {
+	userStr := r.PathValue("uid")
+	exists := h.useCases.UIDExists(userStr)
+	if exists {
+		w.WriteHeader(http.StatusFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusNotFound)
+}
+
+// Retorna mão
+func (h Handlers) getHand(w http.ResponseWriter, r *http.Request) {
+	userStr := r.PathValue("uid")
+	exists := h.useCases.UserExists(userStr)
+
+	// se encontrou usuário
+	if exists {
+		hand, err := h.useCases.GetHand(userStr)
+
+		if err != nil {
+			w.WriteHeader(http.StatusForbidden) // poucas cartas
+			json.NewEncoder(w).Encode(hand)
+			return
+		}
+
+		// status sucesso, conseguiu criar mão
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(hand)
+	} else {
+		// se não encontrou usuário
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
 }

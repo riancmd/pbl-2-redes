@@ -163,7 +163,7 @@ func (c *Client) TradingDequeue() error {
 }
 
 // Sincroniza nova batalha
-func (c *Client) MatchNew(match models.Match) error {
+func (c *Client) MatchNew(match models.MatchInitialRequest) error {
 	// Encapsula dados em JSON
 	jsonData, err := json.Marshal(match)
 

@@ -17,7 +17,7 @@ type ClusterSync interface {
 	// Sincroniza o dequeue na fila de troca
 	TradingDequeue() error
 	// Sincroniza nova batalha
-	MatchNew(Match models.Match) error
+	MatchNew(Match models.MatchInitialRequest) error
 	// Sincroniza nova batalha
 	MatchEnd(string) error
 	// Sincroniza compra de carta
@@ -28,5 +28,10 @@ type ClusterSync interface {
 	UserNew(username string) error
 	// Atualiza partida
 	//UpdateMatch(match models.Match) error
+
 	//..........
+	// Pega a mão do usuário solicitando a um certo servidor
+	GetHand(UID string) ([]*models.Card, error)
+	// Verifica se é líder
+	IsLeader() bool
 }

@@ -28,7 +28,7 @@ func (m Matches) MatchExists(ID string) bool {
 
 func (m Matches) UserOnMatch(UID string) bool {
 	for _, v := range m.matches {
-		if v.P1.UID == UID {
+		if v.P1 == UID {
 			return true
 		}
 	}
@@ -56,4 +56,8 @@ func (m Matches) Remove(matchID string) error {
 		}
 	}
 	return errors.New("match has already ended")
+}
+
+func (m Matches) UpdateMatch(match models.Match) error {
+	return nil
 }

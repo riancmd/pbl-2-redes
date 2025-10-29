@@ -9,13 +9,13 @@ import (
 )
 
 // Retorna todo o vault de cartas
-func (u UseCases) GetAllCards() []models.Booster {
+func (u *UseCases) GetAllCards() []models.Booster {
 	cards := u.repos.Card.GetAll()
 	return cards
 }
 
 // Adiciona novas cartas ao vault
-func (u UseCases) AddCards(newBooster models.Booster) error {
+func (u *UseCases) AddCards(newBooster models.Booster) error {
 	if u.repos.Card == nil {
 		return errors.New("vault doesn't exist")
 	}
@@ -26,7 +26,7 @@ func (u UseCases) AddCards(newBooster models.Booster) error {
 }
 
 // Pega um booster do vault e o retorna
-func (u UseCases) GetBooster() (models.Booster, error) {
+func (u *UseCases) GetBooster() (models.Booster, error) {
 	// verifica se vault vazio
 	empty := u.repos.Card.CardsEmpty()
 
@@ -49,14 +49,14 @@ func (u UseCases) GetBooster() (models.Booster, error) {
 // Caso um servidor que não foi o que comprou a carta pra seu cliente receber uma notificação para remover certa carta,
 // usa-se essa função
 // Dessa forma, não é preciso sincronizar diretamente nela, pois ela só funciona caso tenha acontecido uma compra
-func (u UseCases) RemoveBooster(BID int) error {
+func (u *UseCases) RemoveBooster(BID int) error {
 	return u.repos.Card.Remove(BID)
 }
 
 // função que atualiza vault de cartas
 // filename: indica onde está localizado o arquivo
 // boosters_qt: indica a quantidade de boosters a serem criados
-func (u UseCases) AddCardsFromFile(filename string, boosters_qt int) error {
+func (u *UseCases) AddCardsFromFile(filename string, boosters_qt int) error {
 	// cria o glossário de cartas
 	glossary, err := u.utils.CardDB.LoadCardsFromFile(filename)
 	if err != nil {

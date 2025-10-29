@@ -6,13 +6,13 @@ import (
 )
 
 // Retorna a fila inteira de trocas
-func (u UseCases) Trading_GetAllEnqueuedPlayers() []string {
+func (u *UseCases) Trading_GetAllEnqueuedPlayers() []string {
 	queue := u.repos.BattleQueue.GetAll()
 	return queue
 }
 
 // Coloca na filha de trocas
-func (u UseCases) Trading_Enqueue(UID string) error {
+func (u *UseCases) Trading_Enqueue(UID string) error {
 	enqueued := u.repos.BattleQueue.UserEnqueued(UID)
 
 	if enqueued {
@@ -34,7 +34,7 @@ func (u UseCases) Trading_Enqueue(UID string) error {
 }
 
 // Dá um pop na fila
-func (u UseCases) Trading_Dequeue() error {
+func (u *UseCases) Trading_Dequeue() error {
 	// Sincroniza entre servidores
 	err := u.sync.BattleDequeue()
 

@@ -7,7 +7,7 @@ import (
 
 // SISTEMA DE MATCHMAKING
 // mensagem interna de jogo para a goroutine do Match
-type matchMsg struct {
+type MatchMsg struct {
 	PlayerUID string
 	Action    string
 	Data      json.RawMessage
@@ -23,8 +23,8 @@ const (
 
 type Match struct {
 	ID       string
-	ServerID int // port
-	P1, P2   *User
+	ServerID int    // port
+	P1, P2   string // UID
 	State    MatchState
 	Turn     string // ID do jogador que joga a próxima ação
 
@@ -37,6 +37,12 @@ type Match struct {
 
 	inbox chan matchMsg // canal para trocar msgs entre threads
 	//mu *sync.Mutex
+}
+
+type MatchInitialRequest struct {
+	ID       string
+	ServerID int    // port
+	P1, P2   string // UID
 }
 
 type MatchManager struct {
