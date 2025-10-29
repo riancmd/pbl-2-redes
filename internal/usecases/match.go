@@ -1,7 +1,9 @@
 package usecases
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"pbl-2-redes/internal/models"
 	"time"
@@ -61,7 +63,7 @@ func (u *UseCases) AddMatch(matchReq models.MatchInitialRequest) error {
 		RoundsInState:    map[string]int{matchReq.P1: 0, matchReq.P2: 0},
 		StateLockedUntil: map[string]int{matchReq.P1: 0, matchReq.P2: 0},
 		CurrentRound:     1,
-		inbox:            make(chan models.MatchMsg, 16),
+		Inbox:            make(chan models.MatchMsg, 0),
 	}
 
 	mReq.Hand[mReq.P1] = handP1
@@ -94,6 +96,27 @@ func (u *UseCases) EndMatch(ID string) error {
 	}
 
 	return nil
+}
+
+// Dispatcher é a goroutine que ouve o canal principal e envia pras goroutines
+func (u *UseCases) Dispatcher() {
+	for msg := range u.inbox {
+		u.inboxMU.Lock()
+
+		targetInbox, found := u.inboxes[msg.BattleID]
+
+		u.inboxMU.Unlock()
+
+		if found {
+			select {
+			case targetInbox <- msg.MatchMsg:
+				//entregou
+			default:
+				slog.Error("Inbox cheio")
+			}
+		}
+	}
+
 }
 
 // Goroutine responsável por ouvir se existem batalhas
@@ -131,7 +154,37 @@ func (u *UseCases) CheckNewMatches() {
 }
 
 // Gerencia a partida
-func (u *UseCases) ManageMatch(match models.Match) error {
+func (u *UseCases) ManageMatch(match models.Match) {
+	for {
+		select {
+		// verifica se a mensagem é para minha batalha
+		case msg := <-u.inboxes[match.ID]:
+			switch msg.Action {
+			case "usecard":
+				if u.HandleUseCard(msg.Data) {
+				}
+			case "giveup":
+				u.HandleGiveUp(msg.Data)
+			}
+
+		case <-timeout:
+			u.NotifyBoth(fmt.Sprintf("%s perdeu o turno por timeout", currentPlayer.Username))
+		}
+	}
+}
+
+// HandleUsecard
+func (u *UseCases) HandleUseCard(data json.RawMessage) {
+
+}
+
+// HandleGiveUp
+func (u *UseCases) HandleGiveUp(data json.RawMessage) {
+
+}
+
+// HandleGiveUp
+func (u *UseCases) NotifyBoth(msg, currentPlayerUsername string) {
 
 }
 

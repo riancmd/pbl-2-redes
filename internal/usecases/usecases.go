@@ -1,6 +1,7 @@
 package usecases
 
 import (
+	"pbl-2-redes/internal/models"
 	"pbl-2-redes/internal/repositories"
 	"pbl-2-redes/internal/utils"
 	"sync"
@@ -13,8 +14,16 @@ type UseCases struct {
 	matchesMU sync.Mutex
 	usersMU   sync.Mutex
 	cardsMU   sync.Mutex
+	inboxMU   sync.Mutex
 	bqueue    sync.Mutex
 	tqueue    sync.Mutex
+
+	inbox chan models.BattleRequest // se eu criar esse inbox aqui, toda vez que o handler pubsub receber alguma requisição com o id de batalha, ele joga aqui
+	// a goroutine de dispatcher fica ouvindo esse inbox e verifica se a coisa é da batalha de fulaninho
+	// se a coisa for da batalha de fulaninho, dispatcher envia pro canal dele
+	// lá na goroutine de batalha vai ter um case que verifica QUAL o tipo de requisição
+	// de acordo com o tipo
+	inboxes map[string]chan models.MatchMsg
 }
 
 func New(repos *repositories.Repositories, csync ClusterSync) *UseCases {
@@ -25,6 +34,7 @@ func New(repos *repositories.Repositories, csync ClusterSync) *UseCases {
 		matchesMU: sync.Mutex{},
 		usersMU:   sync.Mutex{},
 		cardsMU:   sync.Mutex{},
+		inboxMU:   sync.Mutex{},
 		bqueue:    sync.Mutex{},
 		tqueue:    sync.Mutex{},
 	}

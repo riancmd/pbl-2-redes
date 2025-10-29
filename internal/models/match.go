@@ -13,6 +13,12 @@ type MatchMsg struct {
 	Data      json.RawMessage
 }
 
+// mensagem que PUBSUB envia no canal do usecases
+type BattleRequest struct {
+	BattleID string
+	MatchMsg MatchMsg
+}
+
 type MatchState int
 
 const (
@@ -35,7 +41,7 @@ type Match struct {
 	StateLockedUntil map[string]int // para controlar quando pode mudar estado
 	CurrentRound     int
 
-	inbox chan matchMsg // canal para trocar msgs entre threads
+	Inbox chan MatchMsg // canal para trocar msgs entre threads
 	//mu *sync.Mutex
 }
 

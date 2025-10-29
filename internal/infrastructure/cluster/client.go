@@ -43,6 +43,6 @@ func (c *Client) AmILeader() bool {
 }
 
 // Pego meu ID
-func (c *Client) GetMyID() int {
+func (c *Client) GetServerID() int {
 	return c.bullyElection.GetServerID()
 }
