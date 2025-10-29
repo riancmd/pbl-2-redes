@@ -41,6 +41,7 @@ type MatchRequest struct {
 
 // "Requisição" de envio de nova carta
 type NewCardRequest struct {
+	BattleId           string `json:"battleId"` //Id da batalha que solicitou a carta
 	UserId             string `json:"userId"`
 	ClientReplyChannel string `json:"clientReplyChannel"` //Canal pessoal do cliente para PUBLISH
 	Card               Card   `json:"card"`
@@ -54,6 +55,7 @@ type TradeRequest struct {
 
 // "Requisição" de envio de uma ação em uma batalha
 type GameActionRequest struct {
+	BattleId           string `json:"battleId"` //Id da batalha que recebe a ação
 	Type               string `json:"type"`
 	UserId             string `json:"userId"`
 	ClientReplyChannel string `json:"clientReplyChannel"`
@@ -100,6 +102,8 @@ type PayLoad struct {
 	Sanity      map[string]int        `json:"sanity"`
 	DreamStates map[string]DreamState `json:"dreamStates"`
 	Round       int                   `json:"round"`
+	BattleId    string                `json:"battleId"` //Id da batalha que entrou
+
 }
 
 // Resposta de erro

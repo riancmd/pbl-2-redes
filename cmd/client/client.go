@@ -40,6 +40,7 @@ var (
 	username     string
 	loggedIn     bool
 	replyChannel string //Canal no Redis Cluster para o cliente receber respostas
+	battleId     string // Id da batalha que entrou
 
 	// dados do jogo
 	inventory  []*models.Card
@@ -351,6 +352,9 @@ func handleResponse(extRes models.ExternalResponse) {
 			hand[i] = &payload.Hand[i]
 		}
 
+		//Salvar id da batalha que entrou
+		battleId = payload.BattleId
+
 		matchInfo.P2 = payload.P2
 		matchInfo.Sanity = payload.Sanity
 		matchInfo.DreamStates = payload.DreamStates
@@ -561,6 +565,7 @@ func handleBattleTurn() {
 
 func useCard(card *models.Card) {
 	req := models.NewCardRequest{
+		BattleId:           battleId,
 		UserId:             uid,
 		ClientReplyChannel: replyChannel,
 		Card:               *card,
@@ -592,6 +597,7 @@ func useCard(card *models.Card) {
 
 func giveUp() {
 	req := models.GameActionRequest{
+		BattleId:           battleId,
 		Type:               giveup,
 		UserId:             uid,
 		ClientReplyChannel: replyChannel,

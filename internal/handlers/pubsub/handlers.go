@@ -306,7 +306,7 @@ func (h *PubSubHandlers) processServerPersonal(payload string) {
 			responseData = models.MatchResponse{
 				Type:    enqueued,
 				Status:  true,
-				Message: "Entrou na fila",
+				Message: "Entrou na fila de batalha",
 			}
 
 			responseType = enqueued
@@ -336,8 +336,13 @@ func (h *PubSubHandlers) processServerPersonal(payload string) {
 		if err != nil {
 			processingError = err
 		} else {
-			responseData = models.TradeResponse{}
-			responseType = enqueued
+			responseData = models.TradeResponse{
+				Type:    tradeEnqueued,
+				Status:  true,
+				Message: "Entrou na fila de troca",
+			}
+
+			responseType = tradeEnqueued
 		}
 
 	case "useCard":
@@ -359,8 +364,6 @@ func (h *PubSubHandlers) processServerPersonal(payload string) {
 
 		replyChannel = req.ClientReplyChannel
 
-		//Mudar aqui a lógica
-		var err error
 		if err != nil {
 			processingError = err
 		} else {
