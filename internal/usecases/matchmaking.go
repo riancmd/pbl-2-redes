@@ -18,11 +18,23 @@ func (u *UseCases) matchmakingLoop() {
 				continue
 			}
 
+			Server1 := u.sync.FindServer(p1)
+			Server2 := u.sync.FindServer(p2)
+
+			if u.UIDExists(p1) {
+				Server1 = u.sync.GetServerID()
+			}
+
+			if u.UIDExists(p2) {
+				Server2 = u.sync.GetServerID()
+			}
+
 			matchReq := models.MatchInitialRequest{
-				ID:       (uuid.New()).String(),
-				ServerID: u.sync.GetServerID(),
-				P1:       p1,
-				P2:       p2,
+				ID:      (uuid.New()).String(),
+				Server1: Server1,
+				Server2: Server2,
+				P1:      p1,
+				P2:      p2,
 			}
 
 			u.AddMatch(matchReq)

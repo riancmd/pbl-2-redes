@@ -36,4 +36,6 @@ type ClusterSync interface {
 	IsLeader() bool
 	// Pego ID do server
 	GetServerID() int
+	// Encontra qual o servidor dono daquele usuário
+	FindServer(UID string) int
 }

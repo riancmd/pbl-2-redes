@@ -282,3 +282,17 @@ func (c *Client) UserNew(username string) error {
 
 	return nil
 }
+
+// Encontra ID do servidor daquele usuário
+func (c *Client) FindServer(uid string) int {
+	// Verificar qual servidor é
+	for _, p := range c.peers {
+		exists, _ := c.uidExists(p, uid)
+
+		if exists {
+			peer := p
+			return peer
+		}
+	}
+	return c.GetServerID()
+}

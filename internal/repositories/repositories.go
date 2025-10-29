@@ -47,7 +47,7 @@ type Repositories struct {
 		GetAll() []string
 		Enqueue(UID string)
 		Dequeue() error
-		GetDequeuedPlayers() string
+		GetDequeuedPlayers() (string, string)
 		UserEnqueued(string) bool
 		Length() int
 	}

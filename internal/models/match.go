@@ -28,11 +28,11 @@ const (
 )
 
 type Match struct {
-	ID       string
-	ServerID int    // port
-	P1, P2   string // UID
-	State    MatchState
-	Turn     string // ID do jogador que joga a próxima ação
+	ID               string
+	Server1, Server2 int    // port
+	P1, P2           string // UID
+	State            MatchState
+	Turn             string // ID do jogador que joga a próxima ação
 
 	Hand             map[string][]*Card // 10 cartas por jogador
 	Sanity           map[string]int     // pontos por jogador
@@ -41,14 +41,14 @@ type Match struct {
 	StateLockedUntil map[string]int // para controlar quando pode mudar estado
 	CurrentRound     int
 
-	Inbox chan MatchMsg // canal para trocar msgs entre threads
+	//Inbox chan MatchMsg // canal para trocar msgs entre threads
 	//mu *sync.Mutex
 }
 
 type MatchInitialRequest struct {
-	ID       string
-	ServerID int    // port
-	P1, P2   string // UID
+	ID               string
+	Server1, Server2 int    // port
+	P1, P2           string // UID
 }
 
 type MatchManager struct {

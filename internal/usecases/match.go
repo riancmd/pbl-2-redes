@@ -51,11 +51,13 @@ func (u *UseCases) AddMatch(matchReq models.MatchInitialRequest) error {
 
 	// estrutura request da partida
 	mReq := models.Match{
-		ID:    matchReq.ID,
-		P1:    matchReq.P1,
-		P2:    matchReq.P2,
-		State: models.Running,
-		Turn:  matchReq.P1,
+		ID:      matchReq.ID,
+		Server1: matchReq.Server1,
+		Server2: matchReq.Server2,
+		P1:      matchReq.P1,
+		P2:      matchReq.P2,
+		State:   models.Running,
+		Turn:    matchReq.P1,
 
 		Hand:             map[string][]*models.Card{},
 		Sanity:           map[string]int{matchReq.P1: 40, matchReq.P2: 40},
@@ -63,11 +65,12 @@ func (u *UseCases) AddMatch(matchReq models.MatchInitialRequest) error {
 		RoundsInState:    map[string]int{matchReq.P1: 0, matchReq.P2: 0},
 		StateLockedUntil: map[string]int{matchReq.P1: 0, matchReq.P2: 0},
 		CurrentRound:     1,
-		Inbox:            make(chan models.MatchMsg, 0),
 	}
 
 	mReq.Hand[mReq.P1] = handP1
 	mReq.Hand[mReq.P2] = handP2
+
+	// descobrindo quem é
 
 	u.matchesMU.Lock()
 
@@ -145,7 +148,7 @@ func (u *UseCases) CheckNewMatches() {
 		if u.repos.Match.Length() >= 1 {
 			// para cada partida, se for minha partida E não estiver gerenciada, gerencio
 			for _, match := range allMatches {
-				if match.ServerID != u.sync.GetServerID() {
+				if match.Server1 != u.sync.GetServerID() && match.Server2 != u.sync.GetServerID() {
 					continue
 				}
 				u.matchesMU.Lock()
