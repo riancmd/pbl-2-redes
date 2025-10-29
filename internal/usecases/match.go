@@ -98,6 +98,18 @@ func (u *UseCases) EndMatch(ID string) error {
 	return nil
 }
 
+// Enviar msg
+func (u *UseCases) SendMsg(msg models.BattleRequest) {
+	select {
+	case u.inbox <- msg:
+		// entregou
+
+	default:
+		slog.Error("inbox cheio")
+	}
+
+}
+
 // Dispatcher é a goroutine que ouve o canal principal e envia pras goroutines
 func (u *UseCases) Dispatcher() {
 	for msg := range u.inbox {
