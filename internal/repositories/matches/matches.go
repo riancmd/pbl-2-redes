@@ -17,6 +17,15 @@ func (m Matches) GetAll() []models.Match {
 	return m.matches
 }
 
+func (m Matches) GetMatch(id string) (models.Match, error) {
+	for _, v := range m.matches {
+		if v.ID == id {
+			return v, nil
+		}
+	}
+	return models.Match{}, errors.New("match doesn't exist")
+}
+
 func (m Matches) MatchExists(ID string) bool {
 	for _, v := range m.matches {
 		if v.ID == ID {

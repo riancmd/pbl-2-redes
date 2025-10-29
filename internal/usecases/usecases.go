@@ -24,18 +24,21 @@ type UseCases struct {
 	// lá na goroutine de batalha vai ter um case que verifica QUAL o tipo de requisição
 	// de acordo com o tipo
 	inboxes map[string]chan models.MatchMsg
+
+	managedMatches map[string]bool
 }
 
 func New(repos *repositories.Repositories, csync ClusterSync) *UseCases {
 	return &UseCases{
-		repos:     repos,
-		utils:     utils.New(),
-		sync:      csync,
-		matchesMU: sync.Mutex{},
-		usersMU:   sync.Mutex{},
-		cardsMU:   sync.Mutex{},
-		inboxMU:   sync.Mutex{},
-		bqueue:    sync.Mutex{},
-		tqueue:    sync.Mutex{},
+		repos:          repos,
+		utils:          utils.New(),
+		sync:           csync,
+		matchesMU:      sync.Mutex{},
+		usersMU:        sync.Mutex{},
+		cardsMU:        sync.Mutex{},
+		inboxMU:        sync.Mutex{},
+		bqueue:         sync.Mutex{},
+		tqueue:         sync.Mutex{},
+		managedMatches: make(map[string]bool, 0),
 	}
 }

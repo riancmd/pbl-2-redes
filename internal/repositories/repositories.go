@@ -28,6 +28,7 @@ type Repositories struct {
 	}
 	Match interface {
 		GetAll() []models.Match
+		GetMatch(ID string) (models.Match, error)
 		Add(newMatch models.Match)
 		MatchExists(ID string) bool
 		UserOnMatch(UID string) bool

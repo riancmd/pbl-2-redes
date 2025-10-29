@@ -3,7 +3,6 @@ package usecases
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"pbl-2-redes/internal/models"
 	"time"
@@ -136,7 +135,6 @@ func (u *UseCases) Dispatcher() {
 
 // Goroutine responsável por ouvir se existem batalhas
 func (u *UseCases) CheckNewMatches() {
-	managedMatches := make(map[string]bool, 0)
 	allMatches := []models.Match{}
 
 	// loop de verificação
@@ -153,12 +151,12 @@ func (u *UseCases) CheckNewMatches() {
 				}
 				u.matchesMU.Lock()
 				// se tiver sendo gerenciada já
-				if managedMatches[match.ID] {
+				if u.managedMatches[match.ID] {
 					u.matchesMU.Unlock()
 					continue
 				}
 				slog.Error("new match found")
-				managedMatches[match.ID] = true
+				u.managedMatches[match.ID] = true
 
 				u.matchesMU.Unlock()
 
@@ -170,21 +168,115 @@ func (u *UseCases) CheckNewMatches() {
 
 // Gerencia a partida
 func (u *UseCases) ManageMatch(match models.Match) {
+	// crio o inbox
+	matchInbox := make(chan models.MatchMsg, 16) // 16 é um bom buffer, como no código antigo
+	u.inboxMU.Lock()
+	u.inboxes[match.ID] = matchInbox
+	u.inboxMU.Unlock()
+
+	slog.Info("started a new match")
+
+	// Limpeza ao final da partida
+	defer func() {
+		slog.Warn("Encerrando gerenciamento da partida", "matchID", match.ID)
+
+		u.matchesMU.Lock()
+		delete(u.managedMatches, match.ID) // u.managedMatches é o mapa em UseCases
+		u.matchesMU.Unlock()
+
+		// Limpa o inbox
+		u.inboxMU.Unlock()
+		delete(u.inboxes, match.ID)
+		u.inboxMU.Unlock()
+		close(matchInbox)
+	}()
+
+	// identificando o dono da partida
+	// server1 é o "dono" da partida
+	isPrimaryServer := match.Server1 == u.sync.GetServerID()
+	if isPrimaryServer {
+		slog.Info("this is the primary server", "matchID", match.ID)
+		// (Opcional) Notifica os jogadores que a partida começou
+		// u.NotifyGameStart(match) // -> Você precisará criar esta função
+	} else {
+		slog.Info("this is the secondary server", "matchID", match.ID)
+	}
+
+	var timeout <-chan time.Time
+
 	for {
+		// pego a partida como está no repositório
+		currentMatch, err := u.repos.Match.GetMatch(match.ID)
+		if err != nil {
+			slog.Error("match not found", "matchID", match.ID, "err", err)
+			return //partida foi removida ou deu erro
+		}
+
+		// Se a partida terminou, apenas encerra.
+		if currentMatch.State == models.Finished {
+			slog.Info("Partida já está finalizada, encerrando goroutine", "matchID", match.ID)
+			return
+		}
+
+		// Configura o timeout
+		// APENAS o servidor primário pode dar timeout.
+		if isPrimaryServer {
+			// Timeout 15 segundos
+			timeout = time.After(15 * time.Second)
+		} else {
+			// Servidores secundários esperam para sempre (nil channel)
+			timeout = nil
+		}
+
+		// CORE DA FUNÇÃO
 		select {
-		// verifica se a mensagem é para minha batalha
-		case msg := <-u.inboxes[match.ID]:
-			switch msg.Action {
-			case "usecard":
-				if u.HandleUseCard(msg.Data) {
-				}
-			case "giveup":
-				u.HandleGiveUp(msg.Data)
+		// lido com as mensagens de ação do jogador
+		case msg, ok := <-matchInbox:
+			if !ok {
+				slog.Error("match channel was closed")
+				return // O canal foi fechado (provavelmente pelo defer)
 			}
 
+			// Validação (do processTurn)
+			// Verifica turno
+			if msg.PlayerUID != currentMatch.Turn {
+				continue
+			}
+
+			// Processa a Ação
+			switch msg.Action {
+			case "usecard":
+				slog.Info("processing 'usecard'", "matchID", match.ID, "player", msg.PlayerUID)
+				// HandleUseCard tem a lógica dos antigos:
+				// 1. handleUseCard
+				// 2. updateGameState
+				// 3. checkGameEnd
+				// 4. switchTurn
+				// 5. Por fim, o novo u.sync.UpdateMatch(matchAtualizada)
+				if err := u.HandleUseCard(currentMatch.ID, msg.Data); err != nil {
+					slog.Error("error while processing 'usecard'", "err", err)
+				}
+
+			case "giveup":
+				slog.Info("processing 'giveup'", "matchID", match.ID, "player", msg.PlayerUID)
+				// HandleGiveUp tem a lógica de:
+				// 1. handleGiveUp (do matchManager.go)
+				// 2. u.sync.UpdateMatch(matchAtualizada)
+				if err := u.HandleGiveUp(currentMatch.ID, msg.Data); err != nil {
+					slog.Error("error while processing 'giveup'", "err", err)
+				}
+			}
+
+		// se tiver timeout
 		case <-timeout:
-			u.NotifyBoth(fmt.Sprintf("%s perdeu o turno por timeout", currentPlayer.Username))
+			// só o primeiro servidor que gerencia isso
+			slog.Warn("timeout", "matchID", match.ID, "player", currentMatch.Turn)
+			if err := u.HandleTimeout(currentMatch.ID); err != nil {
+				slog.Error("Erro ao processar 'timeout'", "err", err)
+			}
 		}
+		// O loop 'for' recomeça, busca o novo estado da partida no repositório,
+		// e reinicia o timer para o (possivelmente) novo jogador.
 	}
 }
 
@@ -198,8 +290,8 @@ func (u *UseCases) HandleGiveUp(data json.RawMessage) {
 
 }
 
-// HandleGiveUp
-func (u *UseCases) NotifyBoth(msg, currentPlayerUsername string) {
+// HandleTimeOut
+func (u *UseCases) HandleTimeout(matchID string) {
 
 }
 
