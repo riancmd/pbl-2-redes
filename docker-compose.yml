@@ -1,38 +1,163 @@
 version: "3.8"
 
+networks:
+  game-net:
+    driver: bridge
+
 services:
-  #serviço do server
-  server:
-    build:
-      context: ./server
-    container_name: server
-    ports:
-      - "8080:8080" # tcp pro jogo normal
-      - "8081:8081/udp" # a udp que é apenas pra latência
+  # --- 1. Cluster Redis de 3 Nós ---
+  redis-node-1:
+    image: redis:7-alpine
+    container_name: redis-node-1
+    hostname: redis-node-1
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000
     networks:
-      - go-net
+      - game-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
 
-  # serviço do cliente 
-  client:
-    build:
-      context: ./client
-    container_name: client
+  redis-node-2:
+    image: redis:7-alpine
+    container_name: redis-node-2
+    hostname: redis-node-2
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000
+    networks:
+      - game-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  redis-node-3:
+    image: redis:7-alpine
+    container_name: redis-node-3
+    hostname: redis-node-3
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000
+    networks:
+      - game-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  # --- 2. Inicializador do Cluster Redis ---
+  # Roda uma vez para criar o cluster com 3 mestres (sem réplicas)
+  redis-cluster-init:
+    image: redis:7-alpine
+    container_name: redis-cluster-init
+    command:
+      - sh
+      - -c
+      - |
+        sleep 15
+        echo yes | redis-cli --cluster create redis-node-1:6379 redis-node-2:6379 redis-node-3:6379 --cluster-replicas 0
+        echo 'Cluster Redis criado com sucesso!'
+        sleep infinity
+    networks:
+      - game-net
     depends_on:
-      - server
-    networks:
-      - go-net
-    stdin_open: true # nao tirar (input funfa)
-    tty: true    
+      redis-node-1:
+        condition: service_healthy
+      redis-node-2:
+        condition: service_healthy
+      redis-node-3:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "redis-node-1", "cluster", "info"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+      start_period: 20s
 
-  # serviço dos bots  
-  bots:
+  # --- 3. Servidores do Jogo (3 Instâncias) ---
+  server1:
+    build:
+      context: . # Usa a pasta raiz (meu-projeto/) como contexto
+      dockerfile: server/Dockerfile # Caminho para o Dockerfile do servidor
+    container_name: server1
+    hostname: server1
+    networks:
+      - game-net
+    ports:
+      - "9090:9090"       # API REST (Mapeia porta 9090 do host para 9090 do container)
+      - "8081:8081/udp"   # Heartbeat/Ping (Mapeia porta UDP 8081 do host para 8081 do container)
+    environment:
+      - SERVER_ID=server1
+      - API_PORT=9090
+      - UDP_PORT=8081
+      - REDIS_ADDRS=redis-node-1:6379,redis-node-2:6379,redis-node-3:6379
+      - SERVER_LIST=server1:9090,server2:9091,server3:9092
+    stdin_open: true  # Mantém STDIN aberto para você pressionar Enter
+    tty: true         # Aloca um pseudo-TTY (necessário com stdin_open)
+    depends_on:
+      redis-cluster-init:
+        condition: service_healthy # Espera o cluster estar pronto
+
+  server2:
     build:
       context: .
-    container_name: bots
-    depends_on:
-      - server
+      dockerfile: server/Dockerfile
+    container_name: server2
+    hostname: server2
     networks:
-      - go-net
-    
-networks:
-  go-net:
+      - game-net
+    ports:
+      - "9091:9091" # Porta API diferente no host
+      - "8082:8082/udp" # Porta UDP diferente no host
+    environment:
+      - SERVER_ID=server2
+      - API_PORT=9091 # Porta interna do container
+      - UDP_PORT=8082 # Porta interna do container
+      - REDIS_ADDRS=redis-node-1:6379,redis-node-2:6379,redis-node-3:6379
+      - SERVER_LIST=server1:9090,server2:9091,server3:9092
+    stdin_open: true
+    tty: true
+    depends_on:
+      redis-cluster-init:
+        condition: service_healthy
+
+  server3:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    container_name: server3
+    hostname: server3
+    networks:
+      - game-net
+    ports:
+      - "9092:9092" # Porta API diferente no host
+      - "8083:8083/udp" # Porta UDP diferente no host
+    environment:
+      - SERVER_ID=server3
+      - API_PORT=9092 # Porta interna do container
+      - UDP_PORT=8083 # Porta interna do container
+      - REDIS_ADDRS=redis-node-1:6379,redis-node-2:6379,redis-node-3:6379
+      - SERVER_LIST=server1:9090,server2:9091,server3:9092
+    stdin_open: true
+    tty: true
+    depends_on:
+      redis-cluster-init:
+        condition: service_healthy
+
+  # --- 4. Template do Cliente ---
+  # Este serviço não é iniciado automaticamente. Usamos 'docker-compose run client'.
+  client:
+    build:
+      context: . # Usa a pasta raiz como contexto
+      dockerfile: client/Dockerfile # Caminho para o Dockerfile do cliente
+    networks:
+      - game-net
+    environment:
+      # Passa os endereços do Redis para o cliente
+      - REDIS_ADDRS=redis-node-1:6379,redis-node-2:6379,redis-node-3:6379
+    stdin_open: true # Mantém STDIN aberto para interação
+    tty: true        # Aloca um pseudo-TTY
+    depends_on:      # Garante que os servidores estejam (tentando) subir antes do cliente
+      - server1
+      - server2
+      - server3

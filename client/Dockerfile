@@ -1,17 +1,29 @@
-# usa imagem do golang 1.25!! tem que ser 1.25
-FROM golang:1.25
+# Estágio 1: Build
+FROM golang:1.25-alpine AS builder
+WORKDIR /src
 
-# diretorio de trabalho
+# Copia go.mod/go.sum da pasta raiz do projeto (o 'contexto')
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copia a pasta 'models' da raiz do contexto
+COPY models ./models
+# Copia o código fonte do cliente (da pasta 'client' do contexto) para uma subpasta 'client'
+COPY client/. ./client/
+
+# Muda o diretório de trabalho para a pasta do código do cliente e compila
+WORKDIR /src/client
+RUN go build -o /app/client .
+
+# Estágio 2: Final - Imagem leve apenas com o executável
+FROM alpine:latest
 WORKDIR /app
 
-# copia o código
-COPY . .
+# Adiciona certificados (boa prática)
+RUN apk --no-cache add ca-certificates
 
-# compila
-RUN go build -o client
+# Copia o binário compilado do estágio de build
+COPY --from=builder /app/client .
 
-# permissao de exec binário
-RUN chmod +x ./client
-
-# comando p iniciar client
+# Comando padrão para executar o cliente quando o container iniciar
 CMD ["./client"]

@@ -1,23 +1,29 @@
-# Usa imagem do Go (ver 1.25)
-FROM golang:1.25
+# Estágio 1: Build
+FROM golang:1.25-alpine AS builder
+WORKDIR /src
 
-WORKDIR /app 
-#diretorio de trabalho
+# Copia go.mod/go.sum da pasta raiz do projeto (o 'contexto')
+COPY go.mod go.sum ./
+RUN go mod download
 
-# copia o código
-COPY . .
+# Copia a pasta 'models' da raiz do contexto
+COPY models ./models
+# Copia o código fonte do servidor (da pasta 'server' do contexto) para uma subpasta 'server'
+COPY server/. ./server/
 
-# compila o servidor
-RUN go build -o server
+# Muda o diretório de trabalho para a pasta do código do servidor e compila
+WORKDIR /src/server
+RUN go build -o /app/server .
 
-# garante execução do binário
-RUN chmod +x ./server
+# Estágio 2: Final - Imagem leve apenas com o executável
+FROM alpine:latest
+WORKDIR /app
 
-# portas usadas
-# - 8080 pro tcp (conexão do jogo)
-# - 8081 q é pro udp (teste de latência)
-EXPOSE 8080
-EXPOSE 8081
+# Adiciona certificados (boa prática)
+RUN apk --no-cache add ca-certificates
 
-# comando para iniciar o servidor
+# Copia o binário compilado do estágio de build
+COPY --from=builder /app/server .
+
+# Comando padrão para executar o servidor quando o container iniciar
 CMD ["./server"]
