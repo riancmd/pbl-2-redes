@@ -8,47 +8,51 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"strconv"
 	"strings"
-	"sync/atomic" // Para o controle de estado do heartbeat
+	"sync/atomic" // pra controlar o estado do heartbeat (thread-safe)
 	"time"
 
-	"PlanoZ/models"
+	"PlanoZ/models" // nossas structs
 
 	"github.com/fatih/color"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
-// Estados da máquina de estados
+// os "modos" do cliente, como se fossem telas diferentes
 const (
 	EstadoLivre = iota
 	EstadoPareado
 	EstadoEsperandoResposta
 	EstadoBatalhando
-	EstadoReconectando // Estado para quando o heartbeat falha
+	EstadoTrocando
+	EstadoReconectando // estado novo pra qnd o server cair
 )
 
-// Variáveis de sessão do cliente
+// variaveis globais pra guardar o estado do jogo
 var (
-	idPessoal            string // UUID gerado pelo cliente
-	idParceiro           string // ID do oponente pareado
-	idBatalha            string // ID da batalha atual
+	idPessoal            string // nosso ID unico, gerado qnd a gente abre o jogo
+	idParceiro           string // id do maluco q a gente ta pareado
+	idBatalha            string // id da sala de batalha q a gente ta
+	idTroca              string // id da sala de troca
 	minhasCartas         []models.Tanque
-	estadoAtual          int
-	meuCanalResposta     string // Canal de Resposta Pessoal (ex: client_reply:UUID)
-	canalPessoalServidor string // Canal de Requisição do Servidor (ex: servidor_pessoal:SERVER_ID_123)
-	canalUdpServidor     string // Endereço UDP do servidor (ex: server1:8081)
+	indiceCartaOfertada  int    // pra saber qual carta a gente mandou na troca
+	estadoAtual          int    // onde a gente ta agora (EstadoLivre, EstadoBatalhando, etc)
+	meuCanalResposta     string // canal pessoal no redis. o server manda respostas pra ca
+	canalPessoalServidor string // canal do server q a gente ta conectado, pra mandar reqs
+	canalUdpServidor     string // o ip:porta do udp do server, pra pingar
 
-	// Contexto e Cliente Redis
+	// coisas do redis
 	ctx         = context.Background()
 	redisClient *redis.ClusterClient
 
-	// Variáveis de Heartbeat
-	serverVivo    atomic.Bool        // Controla se o servidor conectado está vivo
-	monitorCancel context.CancelFunc // Função para cancelar o monitor UDP anterior
+	// o "kill switch". a goroutine do heartbeat bota isso pra 'false' se o server cair
+	serverVivo    atomic.Bool
+	monitorCancel context.CancelFunc // pra parar a goroutine de heartbeat antiga qnd a gente reconecta
 )
 
-// unmarshalData é um helper para decodificar o campo 'Data' da RespostaGenericaCliente
+// funçaozinha helper. pega o 'Data' generico (interface{}) e bota na struct certa
 func unmarshalData(data interface{}, v interface{}) error {
 	dataBytes, err := json.Marshal(data)
 	if err != nil {
@@ -57,7 +61,7 @@ func unmarshalData(data interface{}, v interface{}) error {
 	return json.Unmarshal(dataBytes, v)
 }
 
-// enviarRequisicaoRedis serializa e envia (LPUSH) uma requisição para um tópico do Redis
+// serializa qualquer struct e envia pra uma lista/fila do redis (LPUSH)
 func enviarRequisicaoRedis(topico string, data interface{}) {
 	reqBytes, err := json.Marshal(data)
 	if err != nil {
@@ -71,9 +75,9 @@ func enviarRequisicaoRedis(topico string, data interface{}) {
 	}
 }
 
-// iniciarMonitoramentoHeartbeat roda em segundo plano para verificar se o servidor está vivo.
+// essa é a goroutine do heartbeat, fica pingando o server via udp
 func iniciarMonitoramentoHeartbeat(ctxMonitor context.Context, endereco string) {
-	ticker := time.NewTicker(5 * time.Second) // Pinga a cada 5 segundos
+	ticker := time.NewTicker(5 * time.Second) // a cada 5 segundos...
 	defer ticker.Stop()
 
 	falhasConsecutivas := 0
@@ -84,66 +88,51 @@ func iniciarMonitoramentoHeartbeat(ctxMonitor context.Context, endereco string) 
 	for {
 		select {
 		case <-ctxMonitor.Done():
-			// O contexto foi cancelado (provavelmente conectamos a um novo server)
+			// se a main thread mandou parar (pq reconectamos)
 			color.Yellow("[Heartbeat]: Monitoramento UDP encerrado para %s", endereco)
 			return
 		case <-ticker.C:
-			// No docker-compose, o host 'server1' pode não ser roteável
-			// A forma correta é o servidor enviar seu endereço IP roteável ou
-			// o cliente usar o nome do host do Docker.
-			// Para simplificar, vamos assumir que o 'endereco' é apenas a porta
-			// e que estamos conectando ao 'host.docker.internal' ou localhost.
-			// No Docker Compose, o nome do serviço (ex: 'server1') é o host.
+			// hora de pingar
 
-			// A porta UDP já vem como "8081". Precisamos do host.
-			// No docker compose, o host é o nome do serviço.
-			// Mas o cliente não sabe o nome do serviço...
-
-			// *** ASSUNÇÃO CRÍTICA ***
-			// Vamos assumir que 'canalUdpServidor' (o 'endereco' aqui)
-			// é o endereço COMPLETO roteável, ex: "server1:8081".
-			// O servidor em 'processConectar' deve enviar isso.
-			// (Vou modificar o server/handlers_redis.go para enviar o HOST:PORT)
-
-			_, err := medirLatenciaUnica(endereco)
+			_, err := medirLatenciaUnica(endereco) // ...tenta pingar
 			if err != nil {
-				falhasConsecutivas++
+				falhasConsecutivas++ // falhou
 				color.Red("[Heartbeat]: Falha no ping (%d/%d): %v", falhasConsecutivas, maxFalhas, err)
 				if falhasConsecutivas >= maxFalhas {
-					// 3 falhas seguidas = servidor morto
+					// falhou 3x seguidas, ja era
 					color.Red("[Heartbeat]: Servidor %s considerado MORTO.", endereco)
-					serverVivo.Store(false) // Sinaliza para a thread principal
-					return                  // Encerra esta goroutine
+					serverVivo.Store(false) // avisa a main loop q o server morreu
+					return                  // e para essa goroutine
 				}
 			} else {
-				// Ping bem-sucedido
+				// ping deu bom
 				if falhasConsecutivas > 0 {
 					color.Green("[Heartbeat]: Servidor %s recuperado.", endereco)
 				}
-				falhasConsecutivas = 0
-				serverVivo.Store(true) // Garante que está marcado como vivo
+				falhasConsecutivas = 0 // zera o contador
+				serverVivo.Store(true) // garante q ta vivo
 			}
 		}
 	}
 }
 
-// ouvirRespostasRedis é a goroutine principal que escuta (BLPOP) no canal de resposta pessoal.
+// A GOROUTINE MAIS IMPORTANTE. fica ouvindo o nosso canal pessoal de respostas
 func ouvirRespostasRedis() {
-	deckBatalha := make([]models.Tanque, 0, 5) // Deck de batalha local
+	deckBatalha := make([]models.Tanque, 0, 5) // deck de batalha local
 
 	for {
-		// BLPop bloqueia até que uma mensagem chegue no 'meuCanalResposta'
+		// aqui o codigo TRAVA, esperando o proximo BLPop no nosso canal
 		resultado, err := redisClient.BLPop(ctx, 0*time.Second, meuCanalResposta).Result()
 		if err != nil {
 			if err == redis.Nil {
 				continue
 			}
-			// Se o Redis cair, o cliente não tem como se recuperar
+			// se o redis cair, ja era
 			color.Red("Erro crítico ao ler do Redis: %v. Encerrando.", err)
 			os.Exit(1)
 		}
 
-		// resultado[0] é a chave (o nome do tópico), resultado[1] é a mensagem
+		// qnd chega, tenta ler a msg generica
 		var resposta models.RespostaGenericaCliente
 		err = json.Unmarshal([]byte(resultado[1]), &resposta)
 		if err != nil {
@@ -151,52 +140,57 @@ func ouvirRespostasRedis() {
 			continue
 		}
 
-		// Processar a resposta com base no Tipo
+		// agora vamos ver o q o server realmente quer dizer
 		switch resposta.Tipo {
 		case "Erro":
+			// o server mandou um "deu ruim"
 			var resp models.RespostaErro
 			if unmarshalData(resposta.Data, &resp) == nil {
 				color.Red("Erro do Servidor: %s", resp.Erro)
 			}
-			// Retorna ao estado anterior com base no contexto
+			// volta pro menu
 			if idParceiro == "none" {
 				estadoAtual = EstadoLivre
 			} else {
 				estadoAtual = EstadoPareado
 			}
+			//idTroca = "none"
 
 		case "Desconexão":
-			// Esta é uma desconexão "limpa" (ex: oponente saiu da batalha)
+			// o oponente desconectou (de forma limpa)
 			color.Yellow("Parece que seu jogador pareado desconectou :(")
 			estadoAtual = EstadoLivre
 			idParceiro = "none"
 			idBatalha = "none"
+			idTroca = "none"
 
 		case "Conexao_Sucesso":
+			// conseguimos conectar! o server mandou os dados dele
 			var resp models.RespostaConexao
 			if unmarshalData(resposta.Data, &resp) != nil {
 				color.Red("Falha ao ler RespostaConexao")
 				continue
 			}
 			color.Green("Conectado com sucesso! Servidor: %s", resp.IdServidorConectado)
-			canalPessoalServidor = resp.CanalPessoalServidor
-			canalUdpServidor = resp.CanalUDPPing // Ex: "server1:8081"
-			estadoAtual = EstadoLivre
+			canalPessoalServidor = resp.CanalPessoalServidor // guarda o canal de reqs do server
+			canalUdpServidor = resp.CanalUDPPing             // guarda o udp pra pingar
+			estadoAtual = EstadoLivre                        // libera o menu principal
 
-			// Ativa o monitoramento de heartbeat para o novo servidor
+			// ativa o monitoramento de heartbeat
 			serverVivo.Store(true)
 
-			// Cancela qualquer monitor anterior que esteja rodando
+			// se tinha um monitor antigo rodando (de uma conexao anterior), mata ele
 			if monitorCancel != nil {
 				monitorCancel()
 			}
 
-			// Cria um novo contexto e inicia um novo monitor
+			// ...e comeca um monitor NOVO pra esse server
 			var ctxMonitor context.Context
 			ctxMonitor, monitorCancel = context.WithCancel(context.Background())
 			go iniciarMonitoramentoHeartbeat(ctxMonitor, resp.CanalUDPPing)
 
 		case "Pareamento":
+			// achamos um oponente
 			var resp models.RespostaPareamento
 			if unmarshalData(resposta.Data, &resp) != nil {
 				color.Red("Falha ao ler RespostaPareamento")
@@ -207,14 +201,16 @@ func ouvirRespostasRedis() {
 			estadoAtual = EstadoPareado
 
 		case "Mensagem":
+			// chat
 			var resp models.RespostaMensagem
-			if unmarshalData(resposta.Data, &resp) != nil {
+			if unmarshalData(resposta.Data, &resp) == nil {
 				color.Red("Falha ao ler RespostaMensagem")
 				continue
 			}
 			color.Cyan("Mensagem de [%s]: %s", resp.Remetente, resp.Mensagem)
 
 		case "Sorteio":
+			// compramos um pacote, adiciona as cartas no inventario
 			var resp models.RespostaSorteio
 			if unmarshalData(resposta.Data, &resp) != nil {
 				color.Red("Falha ao ler RespostaSorteio")
@@ -225,27 +221,41 @@ func ouvirRespostasRedis() {
 			imprimirTanques(resp.Cartas)
 
 		case "Inicio_Batalha":
+			// comecou a batalha
 			var resp models.RespostaInicioBatalha
 			if unmarshalData(resposta.Data, &resp) != nil {
 				color.Red("Falha ao ler RespostaInicioBatalha")
 				continue
 			}
 			color.Yellow("Batalha iniciada! Oponente: %s. ID da Batalha: %s", resp.Mensagem, resp.IdBatalha)
-			idBatalha = resp.IdBatalha // Armazena o ID da batalha
+			idBatalha = resp.IdBatalha // guarda o id da sala
 			deckBatalha = nil
 			if len(minhasCartas) > 0 {
-				deckBatalha = append(deckBatalha, sortearDeck()...)
+				deckBatalha = append(deckBatalha, sortearDeck()...) // sorteia 5 cartas do nosso inventario
 			} else {
-				// Inicializa deck de batalha com cartas inoperantes
+				// se n tem carta, bota umas de treino
 				for i := 0; i < 5; i++ {
 					deckBatalha = append(deckBatalha, models.Tanque{Modelo: "Treinamento", Id_jogador: idPessoal, Vida: 1 + i, Ataque: 1})
 				}
 			}
 			color.Cyan("Seu deck de batalha é:")
 			imprimirTanques(deckBatalha)
-			estadoAtual = EstadoBatalhando
+			estadoAtual = EstadoBatalhando // muda a "tela" pra de batalha
+
+		case "Inicio_Troca":
+			// comecou a troca
+			var resp models.RespostaInicioTroca
+			if unmarshalData(resposta.Data, &resp) != nil {
+				color.Red("Falha ao ler RespostaInicioTroca")
+				continue
+			}
+			color.Magenta("Troca iniciada! Oponente: %s. ID da Troca: %s", resp.Mensagem, resp.IdTroca)
+			idTroca = resp.IdTroca       // guarda o id da sala de troca
+			indiceCartaOfertada = -1     // reseta o indice
+			estadoAtual = EstadoTrocando // muda pra "tela" de troca
 
 		case "Fim_Batalha":
+			// acabou a luta
 			var resp models.RespostaFimBatalha
 			if unmarshalData(resposta.Data, &resp) != nil {
 				color.Red("Falha ao ler RespostaFimBatalha")
@@ -254,42 +264,86 @@ func ouvirRespostasRedis() {
 			color.Yellow("Batalha finalizada!")
 			color.Cyan(resp.Mensagem)
 
-			// Se a batalha terminou, mas o servidor está morto,
-			// não vá para EstadoPareado, vá para Reconectar.
+			// checa se o server ainda ta vivo antes de voltar pro menu
 			if serverVivo.Load() {
 				estadoAtual = EstadoPareado
 			} else {
 				estadoAtual = EstadoReconectando
 			}
-			idBatalha = "none" // Reseta o ID da batalha
+			idBatalha = "none" // limpa o id da batalha
+
+		case "Resultado_Troca":
+			// a troca foi concluida (ou falhou)
+			var resp models.RespostaResultadoTroca
+			if unmarshalData(resposta.Data, &resp) != nil {
+				color.Red("Falha ao ler RespostaResultadoTroca")
+				continue
+			}
+
+			// se n veio carta, eh pq falhou ou foi cancelada
+			if resp.CartaRecebida.Modelo == "" {
+				color.Red("A troca falhou ou foi cancelada pelo outro jogador.")
+			} else if indiceCartaOfertada < 0 || indiceCartaOfertada >= len(minhasCartas) {
+				// deu algum erro interno de indice (nao devia acontecer)
+				color.Red("ERRO INTERNO: Não foi possível encontrar a carta ofertada (índice: %d)", indiceCartaOfertada)
+				minhasCartas = append(minhasCartas, resp.CartaRecebida) // Pelo menos adiciona a nova
+			} else {
+				// deu certo! hora de trocar as cartas no inventario
+				cartaRemovida := minhasCartas[indiceCartaOfertada]
+
+				// tira a carta antiga
+				minhasCartas = append(minhasCartas[:indiceCartaOfertada], minhasCartas[indiceCartaOfertada+1:]...)
+
+				// bota a carta nova
+				minhasCartas = append(minhasCartas, resp.CartaRecebida)
+
+				color.Green("Troca Concluída!")
+				color.Red("  - REMOVIDO: %s", cartaRemovida.Modelo)
+				color.Green("  + ADICIONADO: %s", resp.CartaRecebida.Modelo)
+			}
+
+			if serverVivo.Load() {
+				estadoAtual = EstadoPareado
+			} else {
+				estadoAtual = EstadoReconectando
+			}
+			idTroca = "none" // limpa o id da troca
 
 		case "Pedir_Carta":
+			// O SERVER TA PEDINDO NOSSA JOGADA (BATALHA)
 			var resp models.RespostaPedirCarta
 			if unmarshalData(resposta.Data, &resp) != nil {
 				color.Red("Falha ao ler RespostaPedirCarta")
 				continue
 			}
-			indice := resp.Indice
+			indice := resp.Indice // o servidor so manda o *indice* q ele quer do nosso deck de batalha
 			var carta models.Tanque
 
-			// Verificar se indice é válido
+			// ve se o indice é valido
 			if indice < 0 || indice >= len(deckBatalha) {
 				color.Red("ERRO: Índice %d fora do range do deck (0-%d). Enviando carta padrão.", indice, len(deckBatalha)-1)
 				carta = models.Tanque{Modelo: "Padrão", Vida: 10, Ataque: 1, Id_jogador: idPessoal}
 			} else {
-				carta = deckBatalha[indice]
+				carta = deckBatalha[indice] // acha a carta
 				color.Cyan("Enviando carta: %s (Vida: %d, Ataque: %d)", carta.Modelo, carta.Vida, carta.Ataque)
 			}
 
-			reqJogada := models.ReqJogadaBatalha{
+			reqJogada := models.ReqJogadaBatalha{ // prepara o pacote com a carta
 				IdRemetente:   idPessoal,
 				CanalResposta: meuCanalResposta,
 				IdBatalha:     idBatalha,
 				Carta:         carta,
 			}
-			enviarRequisicaoRedis(canalPessoalServidor, reqJogada)
+			enviarRequisicaoRedis(canalPessoalServidor, reqJogada) // e manda pro server
+
+		case "Pedir_Carta_Troca":
+			// o server ta pronto pra receber nossa oferta
+			// a gente so avisa o usuario, quem le o input é o loop main
+			color.Magenta("O servidor está pronto para receber sua oferta de troca.")
+			color.Magenta("Use 'list' para ver suas cartas ou 'ofertar <indice>' para enviar.")
 
 		case "Turno_Realizado":
+			// o oponente jogou, so mostra o resultado
 			var resp models.RespostaTurnoRealizado
 			if unmarshalData(resposta.Data, &resp) != nil {
 				color.Red("Falha ao ler RespostaTurnoRealizado")
@@ -305,17 +359,17 @@ func ouvirRespostasRedis() {
 	}
 }
 
+// o loop principal q le oq o usuario digita
 func main() {
 	color.NoColor = false
 
-	// 1. Gerar ID do Cliente e Canal de Resposta
+	// cria nosso id e nosso canal de "email"
 	idPessoal = uuid.New().String()
 	meuCanalResposta = "client_reply:" + idPessoal
 	color.Yellow("Meu ID Pessoal: %s", idPessoal)
 	color.Yellow("Meu Canal de Resposta: %s", meuCanalResposta)
 
-	// 2. Conectar ao Cluster Redis
-	// (Estes endereços viriam do Docker Compose)
+	// conecta no redis
 	redisAddrs := []string{"redis-node-1:6379", "redis-node-2:6379", "redis-node-3:6379"}
 	redisClient = redis.NewClusterClient(&redis.ClusterOptions{
 		Addrs: redisAddrs,
@@ -328,27 +382,28 @@ func main() {
 	}
 	color.Green("Conectado ao cluster Redis em: %v", redisAddrs)
 
-	// 3. Iniciar Goroutine para ouvir respostas
+	//  IMPORTANTE: inicia a goroutine de escuta (o email)
 	go ouvirRespostasRedis()
 
-	// 4. Enviar requisição de conexão inicial
+	// manda a primeira msg "OI, QUERO CONECTAR"
 	reqConnect := models.ReqConectar{
 		IdRemetente:   idPessoal,
 		CanalResposta: meuCanalResposta,
 	}
 	enviarRequisicaoRedis("conectar", reqConnect)
 
-	// Estado inicial
+	// estado inicial, esperando o "Conexao_Sucesso"
 	estadoAtual = EstadoEsperandoResposta
 	idParceiro = "none"
 	idBatalha = "none"
-	serverVivo.Store(true) // Otimista, o heartbeat corrigirá se estiver errado
+	idTroca = "none"
+	serverVivo.Store(true) // otimismo! acha q o server ta vivo. o heartbeat corrige se n tiver
 
-	// 5. Loop infinito e centralizado que lê do terminal
+	// o loop da ui (o menu)
 	reader := bufio.NewReader(os.Stdin)
 	for {
-		// *** VERIFICAÇÃO DE HEARTBEAT (Ação Local) ***
-		// No início de cada loop, verifica se o monitor UDP marcou o servidor como morto
+		//  O CHECK DO HEARTBEAT
+		// se a goroutine do heartbeat (UDP) falou q o server morreu...
 		if !serverVivo.Load() && estadoAtual != EstadoEsperandoResposta && estadoAtual != EstadoReconectando {
 			color.Red("\n!!! CONEXÃO COM O SERVIDOR PERDIDA !!!")
 
@@ -358,24 +413,26 @@ func main() {
 				color.Yellow("Você foi deslogado.")
 			}
 
-			// *** LIMPA AS VARIÁVEIS LOCAIS (Conforme solicitado) ***
-			estadoAtual = EstadoReconectando
+			// LIMPANDO TUDO
+			estadoAtual = EstadoReconectando // ...muda o estado pra reconectar
 			idParceiro = "none"
 			idBatalha = "none"
+			idTroca = "none"
 			canalPessoalServidor = ""
 			canalUdpServidor = ""
 
-			// Para o monitoramento antigo
+			// ...mata a goroutine de ping antiga
 			if monitorCancel != nil {
 				monitorCancel()
 				monitorCancel = nil
 			}
 		}
-		// *** FIM DA VERIFICAÇÃO ***
+		//  FIM DA VERIFICAÇÃO
 
-		// Ver qual estado do jogador
+		// o menu principal (maquina de estados)
 		switch estadoAtual {
 		case EstadoLivre:
+			// menu principal qnd n ta em batalha/pareado
 			fmt.Println("Comando Parear <id> / Abrir / Ping / Sair: ")
 			line, _ := reader.ReadString('\n')
 			line = strings.TrimSpace(line)
@@ -413,7 +470,8 @@ func main() {
 			}
 
 		case EstadoPareado:
-			fmt.Println("Comando Abrir / Mensagem / Batalhar / Ping / Sair: ")
+			// menu qnd ta pareado com alguem
+			fmt.Println("Comando Abrir / Mensagem / Batalhar / Trocar / Ping / Sair: ")
 			line, _ := reader.ReadString('\n')
 			line = strings.TrimSpace(line)
 
@@ -434,6 +492,20 @@ func main() {
 				} else {
 					req := models.ReqPessoalServidor{
 						Tipo:           "Batalhar",
+						IdRemetente:    idPessoal,
+						CanalResposta:  meuCanalResposta,
+						IdDestinatario: idParceiro,
+					}
+					enviarRequisicaoRedis(canalPessoalServidor, req)
+					estadoAtual = EstadoEsperandoResposta
+				}
+			} else if strings.HasPrefix(line, "Trocar") {
+				// inicia o fluxo de troca
+				if len(minhasCartas) == 0 {
+					color.Red("Você não tem nenhuma carta para trocar.")
+				} else {
+					req := models.ReqPessoalServidor{
+						Tipo:           "Trocar",
 						IdRemetente:    idPessoal,
 						CanalResposta:  meuCanalResposta,
 						IdDestinatario: idParceiro,
@@ -463,30 +535,82 @@ func main() {
 			}
 
 		case EstadoEsperandoResposta:
+			// tela de "carregando..."
 			color.Yellow("Esperando resposta do server...")
 			time.Sleep(1 * time.Second)
 
 		case EstadoBatalhando:
+			// em batalha, o usuario n digita, so espera o server pedir a carta
 			color.Yellow("Batalha ocorrendo!! (Aguardando instruções do servidor...)")
 			time.Sleep(5 * time.Second)
 
+		case EstadoTrocando:
+			// TELA INTERATIVA DA TROCA
+			color.Magenta("Troca em andamento com %s.", idParceiro)
+			color.Magenta("Digite 'list' para ver suas cartas, 'ofertar <indice>' para enviar, ou 'cancelar'.")
+			line, _ := reader.ReadString('\n')
+			line = strings.TrimSpace(line)
+
+			if line == "list" {
+				// mostra o inventario
+				if len(minhasCartas) == 0 {
+					color.Yellow("Você não tem cartas.")
+				} else {
+					imprimirTanques(minhasCartas)
+				}
+			} else if line == "cancelar" {
+				// cancela local, o server vai dar timeout sozinho
+				color.Red("Troca cancelada localmente.")
+				estadoAtual = EstadoPareado
+				idTroca = "none"
+				// O servidor (iniciarTroca) vai dar timeout e chamar encerrarTroca,
+				// que enviará um Resultado_Troca vazio ou Erro, que será ignorado
+				// pois já saímos do estado.
+			} else if strings.HasPrefix(line, "ofertar ") {
+				// o usuario quer ofertar uma carta
+				indiceStr := strings.TrimPrefix(line, "ofertar ")
+				// o usuário digita "ofertar 1" (base 1), mas o slice é base 0.
+				indice, err := strconv.Atoi(indiceStr)
+				if err != nil || indice <= 0 || indice > len(minhasCartas) {
+					color.Red("Índice inválido. Digite um número entre 1 e %d.", len(minhasCartas))
+				} else {
+					indiceCartaOfertada = indice - 1 // converte o indice (usuario digita 1, mas o slice eh 0)
+					carta := minhasCartas[indiceCartaOfertada]
+
+					color.Cyan("Ofertando carta: %s (Vida: %d, Ataque: %d)", carta.Modelo, carta.Vida, carta.Ataque)
+
+					// prepara o pacote pra enviar
+					reqTroca := models.ReqCartaTroca{
+						IdRemetente:   idPessoal,
+						CanalResposta: meuCanalResposta,
+						IdTroca:       idTroca,
+						Carta:         carta,
+					}
+					enviarRequisicaoRedis(canalPessoalServidor, reqTroca) // envia pro server
+
+					// agora eh so esperar o resultado da troca
+					estadoAtual = EstadoEsperandoResposta
+				}
+			} else {
+				color.Red("Comando inválido. Use 'list', 'ofertar <indice>' ou 'cancelar'.")
+			}
+
 		case EstadoReconectando:
+			// o server caiu
 			color.Yellow("Tentando reconectar a um novo servidor...")
-			// Envia uma nova requisição de conexão.
-			// O `BLPOP` do Redis garante que um servidor *vivo* pegue isso.
+			// manda um "OI, QUERO CONECTAR" de novo. algum server vivo vai pegar
 			reqConnect := models.ReqConectar{
 				IdRemetente:   idPessoal,
 				CanalResposta: meuCanalResposta,
 			}
 			enviarRequisicaoRedis("conectar", reqConnect)
 
-			// Otimista: assume que vai funcionar. O heartbeat irá corrigir se
-			// o novo servidor também estiver morto.
+			// otimismo
 			serverVivo.Store(true)
 
-			// Muda para o estado de espera pela resposta "Conexao_Sucesso"
+			// e espera a resposta
 			estadoAtual = EstadoEsperandoResposta
-			time.Sleep(3 * time.Second) // Evita spamming de reconexão
+			time.Sleep(3 * time.Second) // evita spam de conexao
 
 		default:
 			color.Red("Estado indefinido")
@@ -496,7 +620,7 @@ func main() {
 
 // --- Funções Utilitárias (Jogo) ---
 
-// Função para sortear 5 cartas da coleção de cartas do jogador
+// sorteia 5 cartas do nosso inventario pra levar pra batalha
 func sortearDeck() []models.Tanque {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
@@ -510,10 +634,10 @@ func sortearDeck() []models.Tanque {
 	return deck
 }
 
-// Função para imprimir a lista de tanques/cartas
+// so imprime as cartas de um jeito bonito
 func imprimirTanques(lista []models.Tanque) {
 	for i, t := range lista {
-		fmt.Printf("Tanque %d:\n", i+1)
+		fmt.Printf("Tanque %d:\n", i+1) // i+1 pra ficar base 1 pro usuario (1, 2, 3...)
 		fmt.Printf("  Modelo: %s\n", t.Modelo)
 		color.Yellow("  Jogador: %s", t.Id_jogador)
 		color.Green("  Vida: %d", t.Vida)
@@ -523,7 +647,7 @@ func imprimirTanques(lista []models.Tanque) {
 
 // --- Funções de Ping UDP (Simplificadas) ---
 
-// handleManualPing é chamado pelo usuário para ver a latência
+// o comando "Ping" do menu
 func handleManualPing(reader *bufio.Reader) {
 	color.Cyan("Medindo Ping (UDP) para %s...", canalUdpServidor)
 	latencia, err := medirLatenciaUnica(canalUdpServidor)
@@ -533,37 +657,37 @@ func handleManualPing(reader *bufio.Reader) {
 		color.Yellow("Latência: %s", latencia.String())
 	}
 	fmt.Println("Pressione Enter para continuar...")
-	reader.ReadString('\n') // Espera o usuário pressionar Enter
+	reader.ReadString('\n') // espera o usuário pressionar enter pra voltar pro menu
 }
 
-// medirLatenciaUnica envia um "ping" UDP e espera um "pong" UDP
+// a funcao q faz o ping udp de vdd. envia "ping", espera "pong"
 func medirLatenciaUnica(endereco string) (time.Duration, error) {
 	// 'endereco' deve ser "host:porta", ex: "server1:8081"
 
-	// 1. Resolver endereço
+	// acha o server
 	servAddr, err := net.ResolveUDPAddr("udp", endereco)
 	if err != nil {
 		return 0, fmt.Errorf("falha ao resolver endereço UDP '%s': %w", endereco, err)
 	}
 
-	// 2. "Discar" (apenas define o destino padrão)
+	// "disca" (basicamente so prepara o pacote)
 	conn, err := net.DialUDP("udp", nil, servAddr)
 	if err != nil {
 		return 0, fmt.Errorf("falha ao discar UDP: %w", err)
 	}
 	defer conn.Close()
 
-	// 3. Definir timeout
+	// bota um timeout, ninguem merece esperar pra sempre
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	startTime := time.Now()
 
-	// 4. Enviar "ping" (string simples)
+	// manda "ping" (string simples)
 	_, err = conn.Write([]byte("ping"))
 	if err != nil {
 		return 0, fmt.Errorf("erro ao enviar ping UDP: %w", err)
 	}
 
-	// 5. Aguardar "pong" (string simples)
+	// espera "pong" (string simples)
 	buffer := make([]byte, 1024)
 	n, _, err := conn.ReadFromUDP(buffer)
 	if err != nil {
@@ -572,6 +696,7 @@ func medirLatenciaUnica(endereco string) (time.Duration, error) {
 
 	resposta := string(buffer[:n])
 	if resposta != "pong" {
+		// se o server n responder "pong", deu ruim
 		return 0, fmt.Errorf("resposta inesperada do servidor: %s", resposta)
 	}
 

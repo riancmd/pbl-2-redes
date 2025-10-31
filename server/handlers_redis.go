@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// --- Listeners do Redis ---
+//  Listeners do Redis
 
 // Ouve tópicos globais (conectar, comprar_carta)
 func (s *Server) listenRedisGlobal(topico string) {
@@ -74,11 +74,20 @@ func (s *Server) listenRedisPersonal() {
 			continue
 		}
 
+		// Se não for, tenta decodificar como ReqCartaTroca
+		var reqTroca models.ReqCartaTroca
+		errTroca := json.Unmarshal([]byte(msg), &reqTroca)
+
+		if errTroca == nil && reqTroca.IdTroca != "" {
+			go s.processReqCartaTroca(reqTroca) // Nova função (ver abaixo)
+			continue
+		}
+
 		color.Red("Erro ao decodificar requisição pessoal. Pessoal: %v, Jogada: %v", errPessoal, errJogada)
 	}
 }
 
-// --- Processadores de Requisições Redis ---
+//  Processadores de Requisições Redis
 
 // Processa uma nova conexão de cliente
 func (s *Server) processConectar(req models.ReqConectar) {
@@ -292,6 +301,78 @@ func (s *Server) processReqPessoal(req models.ReqPessoalServidor) {
 				return
 			}
 		}
+
+	case "Trocar":
+		color.Green("Processando início de troca entre %s e %s", req.IdRemetente, req.IdDestinatario)
+
+		// Este servidor (S1) será o HOST da troca.
+		s.muPlayers.RLock()
+		infoJ1, okJ1 := s.playerList[req.IdRemetente]
+		infoJ2, okJ2 := s.playerList[req.IdDestinatario]
+		s.muPlayers.RUnlock()
+
+		if !okJ1 || !okJ2 {
+			s.sendToClient(req.CanalResposta, "Erro", models.RespostaErro{Erro: "Um dos jogadores não foi encontrado"})
+			return
+		}
+
+		// 1. Criar a struct Troca (usando models.Troca)
+		tradeID := "trade:" + uuid.New().String()[:8]
+		troca := &models.Troca{
+			Jogador1:     req.IdRemetente,
+			Jogador2:     req.IdDestinatario,
+			ServidorJ1:   infoJ1.ServerHost,
+			ServidorJ2:   infoJ2.ServerHost,
+			CanalJ1:      make(chan models.Tanque, 1), // Canal com buffer 1
+			CanalJ2:      make(chan models.Tanque, 1), // Canal com buffer 1
+			CanalEncerra: make(chan bool, 1),
+		}
+
+		// 2. Armazenar a troca localmente (como Host)
+		// (Requer s.muTrades e s.trades definidos na struct Server)
+		s.muTrades.Lock()
+		s.trades[tradeID] = troca
+		s.muTrades.Unlock()
+
+		// 3. Iniciar a goroutine da troca (precisa ser criada, ex: trade.go)
+		// Esta função (s.iniciarTroca) será responsável por orquestrar a troca,
+		// pedir as cartas e enviar o resultado.
+		go s.iniciarTroca(tradeID, troca, infoJ1.ReplyChannel)
+
+		// 4. Notificar o Servidor J2 (Peer) para ele avisar o J2
+		initReq := models.TradeInitiateRequest{
+			IdTroca:        tradeID,
+			IdJogadorLocal: req.IdDestinatario, // J2
+			IdOponente:     req.IdRemetente,    // J1
+			HostServidor:   s.HostAPI,          // Endereço de callback (EU, S1)
+		}
+
+		// Se for um self-test (J1 e J2 no mesmo server)
+		if infoJ1.ServerID == infoJ2.ServerID {
+			// Simula a chamada de rede localmente (chamando a lógica do handler)
+			// (Requer s.muTradesPeer e s.tradesPeer definidos na struct Server)
+			s.muTradesPeer.Lock()
+			s.tradesPeer[tradeID] = peerTradeInfo{
+				PlayerID: req.IdDestinatario,
+				HostAPI:  s.HostAPI,
+			}
+			s.muTradesPeer.Unlock()
+
+			respInicioJ2 := models.RespostaInicioTroca{
+				Mensagem: req.IdRemetente, // Mensagem é o Oponente
+				IdTroca:  tradeID,
+			}
+			s.sendToClient(infoJ2.ReplyChannel, "Inicio_Troca", respInicioJ2)
+			color.Green("TROCA (Self-Test): Troca %s registrada para J2 %s", tradeID, req.IdDestinatario)
+		} else {
+			// Chamada de rede normal para S2
+			if err := s.sendToHost(infoJ2.ServerHost, "/trade/initiate", initReq); err != nil {
+				s.sendToClient(req.CanalResposta, "Erro", models.RespostaErro{Erro: "Falha ao iniciar troca com o servidor do oponente"})
+				// (Você precisará de uma função s.encerrarTroca, assim como s.encerrarBatalha)
+				s.encerrarTroca(tradeID, "Falha de Rede")
+				return
+			}
+		}
 	}
 }
 
@@ -352,4 +433,65 @@ func (s *Server) processReqJogadaBatalha(req models.ReqJogadaBatalha) {
 
 	color.Red("BATALHA: Recebida jogada para batalha %s, mas batalha não encontrada como Host ou Peer.", req.IdBatalha)
 	s.sendToClient(req.CanalResposta, "Erro", models.RespostaErro{Erro: "Batalha não encontrada ou já encerrada."})
+}
+
+// Processa uma carta de troca (recebida do Redis)
+func (s *Server) processReqCartaTroca(req models.ReqCartaTroca) {
+	// Esta requisição pode ser de J1 (Host) ou J2 (Peer)
+
+	// Tenta como Host (J1)
+	// (Requer s.muTrades e s.trades)
+	s.muTrades.RLock()
+	tradeHost, okHost := s.trades[req.IdTroca]
+	s.muTrades.RUnlock()
+
+	if okHost {
+		// Verifica se é o J1 (Host) enviando
+		if req.IdRemetente == tradeHost.Jogador1 {
+			select {
+			case tradeHost.CanalJ1 <- req.Carta:
+				color.Green("TROCA (Host J1): Recebida carta de J1 para troca %s", req.IdTroca)
+			case <-time.After(2 * time.Second):
+				color.Red("TROCA (Host J1): Timeout ao enviar carta de J1 (canal cheio?) %s", req.IdTroca)
+			}
+			return
+		}
+		// Verifica se é o J2 (Host-Self-Test) enviando
+		if req.IdRemetente == tradeHost.Jogador2 {
+			select {
+			case tradeHost.CanalJ2 <- req.Carta:
+				color.Green("TROCA (Host J2-Self): Recebida carta de J2 para troca %s", req.IdTroca)
+			case <-time.After(2 * time.Second):
+				color.Red("TROCA (Host J2-Self): Timeout ao enviar carta de J2 (canal cheio?) %s", req.IdTroca)
+			}
+			return
+		}
+	}
+
+	// Tenta como Peer (J2)
+	// (Requer s.muTradesPeer e s.tradesPeer)
+	s.muTradesPeer.RLock()
+	peerInfo, okPeer := s.tradesPeer[req.IdTroca]
+	s.muTradesPeer.RUnlock()
+
+	if okPeer && req.IdRemetente == peerInfo.PlayerID {
+		// É o J2 (Peer) enviando. Precisamos encaminhar para o Servidor Host (J1)
+		submitReq := models.TradeSubmitCardRequest{
+			IdTroca: req.IdTroca,
+			Carta:   req.Carta,
+		}
+
+		color.Green("TROCA (Peer J2): Encaminhando carta de %s para Host %s", req.IdRemetente, peerInfo.HostAPI)
+
+		// Envia a carta para o S1 (Host) via API
+		if err := s.sendToHost(peerInfo.HostAPI, "/trade/submit_card", submitReq); err != nil {
+			s.sendToClient(req.CanalResposta, "Erro", models.RespostaErro{
+				Erro: fmt.Sprintf("Falha ao enviar carta para o servidor host: %v", err),
+			})
+		}
+		return
+	}
+
+	color.Red("TROCA: Recebida carta para troca %s, mas troca não encontrada como Host ou Peer.", req.IdTroca)
+	s.sendToClient(req.CanalResposta, "Erro", models.RespostaErro{Erro: "Troca não encontrada ou já encerrada."})
 }

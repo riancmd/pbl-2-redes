@@ -10,7 +10,7 @@ import (
 	"github.com/fatih/color"
 )
 
-// --- Eleição de Líder e Health Check ---
+//  Eleição de Líder e Health Check
 
 // RunHealthChecks periodicamente verifica a saúde de outros servidores
 func (s *Server) RunHealthChecks() {
@@ -24,7 +24,7 @@ func (s *Server) RunHealthChecks() {
 
 		// Mapa temporário dos servidores que estão vivos *agora*
 		liveNow := make(map[string]bool)
-		
+
 		var wg sync.WaitGroup
 		for id, host := range s.serverList {
 			wg.Add(1)
@@ -41,7 +41,7 @@ func (s *Server) RunHealthChecks() {
 
 		// Lista de servidores que acabaram de morrer
 		deadServers := []string{}
-		
+
 		s.muLiveServers.Lock()
 		// Itera sobre o mapa *antigo* (s.liveServers)
 		for id := range s.liveServers {
@@ -76,8 +76,6 @@ func (s *Server) checkServerHealth(host string) bool {
 
 	resp, err := s.httpClient.Get(fmt.Sprintf("http://%s/health", host))
 	if err != nil {
-		// (Comentado para não poluir o log)
-		// color.Red("Falha no health check para %s: %v", host, err)
 		return false
 	}
 	defer resp.Body.Close()
@@ -87,22 +85,46 @@ func (s *Server) checkServerHealth(host string) bool {
 // electNewLeader elege o novo líder com base no ID alfabético (menor porta)
 func (s *Server) electNewLeader(liveNow map[string]bool) {
 	liveIDs := []string{}
-	
-	// Se for a eleição inicial, o mapa liveNow é nil
+
+	// Se for a eleição inicial (liveNow == nil), faz health check de todos
 	if liveNow == nil {
-		s.muLiveServers.RLock()
-		for id := range s.liveServers {
-			liveIDs = append(liveIDs, id)
+		color.Yellow("[DEBUG] Eleição inicial - fazendo health check de todos os servidores...")
+		liveNow = make(map[string]bool)
+
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+
+		for id, host := range s.serverList {
+			wg.Add(1)
+			go func(id, host string) {
+				defer wg.Done()
+				if s.checkServerHealth(host) {
+					mu.Lock()
+					liveNow[id] = true
+					mu.Unlock()
+					color.Green("✓ %s está ONLINE", id)
+				} else {
+					color.Red("✗ %s está OFFLINE", id)
+				}
+			}(id, host)
 		}
-		s.muLiveServers.RUnlock()
-	} else {
-		for id := range liveNow {
-			liveIDs = append(liveIDs, id)
-		}
+		wg.Wait()
+
+		// Atualiza o mapa global
+		s.muLiveServers.Lock()
+		s.liveServers = liveNow
+		s.muLiveServers.Unlock()
 	}
 
-	// Adiciona a si mesmo (caso o health check de si próprio ainda não tenha rodado)
-	// (Verifica se já não está na lista primeiro)
+	// Coleta os IDs dos servidores vivos
+	for id := range liveNow {
+		liveIDs = append(liveIDs, id)
+	}
+
+	// DEBUG: Imprima quem está vivo
+	color.Yellow("[DEBUG] Servidores vivos detectados: %v", liveIDs)
+
+	// Adiciona a si mesmo se não estiver na lista
 	isMeInList := false
 	for _, id := range liveIDs {
 		if id == s.ID {
@@ -110,25 +132,28 @@ func (s *Server) electNewLeader(liveNow map[string]bool) {
 			break
 		}
 	}
-	
+
 	if !isMeInList {
-		if s.checkServerHealth(s.HostAPI) {
-			liveIDs = append(liveIDs, s.ID)
-		}
+		liveIDs = append(liveIDs, s.ID)
+		color.Yellow("[DEBUG] Adicionei a mim mesmo: %s", s.ID)
 	}
 
 	if len(liveIDs) == 0 {
-		color.Red("Nenhum servidor vivo detectado, incluindo eu mesmo. Assumindo liderança por padrão.")
+		color.Red("Nenhum servidor vivo detectado. Assumindo liderança.")
 		liveIDs = append(liveIDs, s.ID)
 	}
 
-	sort.Strings(liveIDs) // "server1" < "server2"
+	sort.Strings(liveIDs)
 	newLeaderID := liveIDs[0]
+
+	color.Cyan("[DEBUG] Eleito líder: %s (entre %v)", newLeaderID, liveIDs)
 
 	s.muLeader.Lock()
 	if s.currentLeader != newLeaderID {
 		s.currentLeader = newLeaderID
-		color.Green("NOVO LÍDER ELEITO: %s", s.currentLeader)
+		color.Green("\n========================================")
+		color.Green("🎖️  NOVO LÍDER ELEITO: %s", s.currentLeader)
+		color.Green("========================================\n")
 	}
 	s.muLeader.Unlock()
 }

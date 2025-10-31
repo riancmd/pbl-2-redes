@@ -9,19 +9,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// --- Handlers da API REST (Gin) ---
+// handlers da api rest (gin)
 
+// o outro server ta me perguntando se eu to vivo (health check)
 func (s *Server) handleHealthCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, models.HealthCheckResponse{
 		Status:   "OK",
 		ServerID: s.ID,
-		IsLeader: s.isLeader(),
+		IsLeader: s.isLeader(), // tbm aviso se eu sou o lider ou n
 	})
 }
 
-// --- Handlers de Sincronização ---
+// handlers de sincronização
 
-// (Líder) Recebe notificação de conexão de um seguidor
+// (so o lider executa) um seguidor (outro server) ta me avisando q um player conectou nele
 func (s *Server) handleLeaderConnect(c *gin.Context) {
 	if !s.isLeader() {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Eu não sou o líder"})
@@ -34,9 +35,9 @@ func (s *Server) handleLeaderConnect(c *gin.Context) {
 		return
 	}
 
-	// 1. Atualizar a lista de jogadores
+	// atualiza a lista global de players
 	s.muPlayers.Lock()
-	oldInfo, exists := s.playerList[req.PlayerID]
+	oldInfo, exists := s.playerList[req.PlayerID] // ve se ele ja tava em outro server
 
 	playerInfo := PlayerInfo{
 		ServerID:     req.ServerID,
@@ -48,15 +49,15 @@ func (s *Server) handleLeaderConnect(c *gin.Context) {
 
 	color.Cyan("LÍDER: Jogador %s registrado no servidor %s", req.PlayerID, req.ServerID)
 
-	// 2. Transmitir a atualização para TODOS os servidores
-	// Se existia, notifica a remoção do server antigo
+	// avisa todo mundo sobre a mudança
+	// se ele ja existia, avisa pra remover do server antigo
 	if exists && oldInfo.ServerID != req.ServerID {
 		updateRemove := models.UpdatePlayerListRequest{
 			PlayerID: req.PlayerID, ServerID: oldInfo.ServerID, Acao: "remove",
 		}
 		s.broadcastToServers("/players/update", updateRemove)
 	}
-	// Notifica a adição no novo server
+	// e avisa pra adicionar no server novo
 	updateReq := models.UpdatePlayerListRequest{
 		PlayerID: req.PlayerID, ServerID: req.ServerID, CanalResposta: req.CanalResposta, Acao: "add",
 	}
@@ -65,7 +66,7 @@ func (s *Server) handleLeaderConnect(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Jogador registrado pelo líder"})
 }
 
-// (Seguidor) Recebe atualização da lista de jogadores do líder
+// (so o seguidor executa) o lider mandou uma atualizacao da lista de players
 func (s *Server) handlePlayerUpdate(c *gin.Context) {
 	var req models.UpdatePlayerListRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -75,6 +76,7 @@ func (s *Server) handlePlayerUpdate(c *gin.Context) {
 
 	s.muPlayers.Lock()
 	if req.Acao == "add" {
+		// adiciona o player na nossa copia local
 		s.playerList[req.PlayerID] = PlayerInfo{
 			ServerID:     req.ServerID,
 			ServerHost:   s.serverList[req.ServerID],
@@ -82,7 +84,8 @@ func (s *Server) handlePlayerUpdate(c *gin.Context) {
 		}
 		color.Cyan("SEGUIDOR: Lista de jogadores atualizada, ADD %s", req.PlayerID)
 	} else if req.Acao == "remove" {
-		// Apenas remove se o jogador estiver no servidor que estamos removendo
+		// remove o player da nossa copia local
+		// (so remove se for do server certo, pra evitar confusao)
 		if info, ok := s.playerList[req.PlayerID]; ok && info.ServerID == req.ServerID {
 			delete(s.playerList, req.PlayerID)
 			color.Cyan("SEGUIDOR: Lista de jogadores atualizada, REMOVE %s", req.PlayerID)
@@ -93,7 +96,7 @@ func (s *Server) handlePlayerUpdate(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Lista de jogadores atualizada"})
 }
 
-// (Líder) Recebe pedido de compra de carta
+// (so o lider executa) um seguidor ta pedindo pra eu processar uma compra de carta
 func (s *Server) handleLeaderBuyCard(c *gin.Context) {
 	if !s.isLeader() {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Eu não sou o líder"})
@@ -106,6 +109,7 @@ func (s *Server) handleLeaderBuyCard(c *gin.Context) {
 		return
 	}
 
+	// acha o player pra saber pra qm responder
 	s.muPlayers.RLock()
 	playerInfo, ok := s.playerList[req.PlayerID]
 	s.muPlayers.RUnlock()
@@ -114,24 +118,26 @@ func (s *Server) handleLeaderBuyCard(c *gin.Context) {
 		return
 	}
 
+	// aqui eh a logica de negocio (unica fonte da verdade)
 	s.muInventory.Lock()
 	if s.pacoteCounter <= 0 {
+		// sem estoque
 		s.muInventory.Unlock()
 		s.sendToClient(playerInfo.ReplyChannel, "Erro", models.RespostaErro{Erro: "Não há mais pacotes disponíveis"})
 		c.JSON(http.StatusOK, gin.H{"message": "Estoque esgotado"})
 		return
 	}
-	s.pacoteCounter--
+	s.pacoteCounter-- // tira 1 do estoque
 	pacotesRestantes := s.pacoteCounter
 	s.muInventory.Unlock()
 
 	color.Cyan("LÍDER: Pacote vendido para %s. Restantes: %d", req.PlayerID, pacotesRestantes)
 
-	// Transmitir atualização do inventário para todos
+	// avisa todo mundo (os outros seguidores) q o estoque mudou
 	invUpdate := models.UpdateInventoryRequest{PacotesRestantes: pacotesRestantes}
 	s.broadcastToServers("/inventory/update", invUpdate)
 
-	// Sortear cartas e enviar diretamente ao cliente
+	// sorteia as cartas e manda direto pro cliente (via redis)
 	cartas := s.sortearCartas(req.PlayerID)
 	respSorteio := models.RespostaSorteio{
 		Mensagem: "Sorteio realizado com sucesso!",
@@ -142,7 +148,7 @@ func (s *Server) handleLeaderBuyCard(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Compra processada"})
 }
 
-// (Seguidor) Recebe atualização do inventário
+// (so o seguidor executa) o lider mandou atualizar o estoque de pacotes
 func (s *Server) handleInventoryUpdate(c *gin.Context) {
 	var req models.UpdateInventoryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -151,16 +157,16 @@ func (s *Server) handleInventoryUpdate(c *gin.Context) {
 	}
 
 	s.muInventory.Lock()
-	s.pacoteCounter = req.PacotesRestantes
+	s.pacoteCounter = req.PacotesRestantes // so atualiza o valor local
 	s.muInventory.Unlock()
 
 	color.Yellow("SEGUIDOR: Inventário atualizado. Pacotes restantes: %d", req.PacotesRestantes)
 	c.JSON(http.StatusOK, gin.H{"message": "Inventário atualizado"})
 }
 
-// --- Handlers de Batalha (P2P entre Servidores) ---
+// handlers de batalha (p2p entre servers)
 
-// (Servidor J2) Recebe pedido (de S1) para iniciar batalha
+// (server 2) o server 1 (host) ta me avisando q uma batalha comecou
 func (s *Server) handleBattleInitiate(c *gin.Context) {
 	var req models.BattleInitiateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -168,6 +174,7 @@ func (s *Server) handleBattleInitiate(c *gin.Context) {
 		return
 	}
 
+	// acha o meu jogador local (j2)
 	s.muPlayers.RLock()
 	player2Info, ok := s.playerList[req.IdJogadorLocal]
 	s.muPlayers.RUnlock()
@@ -177,7 +184,10 @@ func (s *Server) handleBattleInitiate(c *gin.Context) {
 		return
 	}
 
-	// Armazena a associação da batalha com o jogador local (J2) E o host (J1)
+	// importante:
+	// guarda no mapa 'batalhasPeer' o id da batalha,
+	// o id do nosso player (j2) e a api do server 1 (host)
+	// pra gnt saber pra qm responder depois
 	s.muBatalhasPeer.Lock()
 	s.batalhasPeer[req.IdBatalha] = peerBattleInfo{
 		PlayerID: req.IdJogadorLocal,
@@ -185,9 +195,9 @@ func (s *Server) handleBattleInitiate(c *gin.Context) {
 	}
 	s.muBatalhasPeer.Unlock()
 
-	// Notifica o cliente J2 que a batalha começou
+	// avisa o meu cliente (j2) q a batalha comecou
 	resp := models.RespostaInicioBatalha{
-		Mensagem:  req.IdOponente, // Mensagem é o ID do Oponente
+		Mensagem:  req.IdOponente, // manda o id do oponente
 		IdBatalha: req.IdBatalha,
 	}
 	s.sendToClient(player2Info.ReplyChannel, "Inicio_Batalha", resp)
@@ -196,7 +206,7 @@ func (s *Server) handleBattleInitiate(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Batalha iniciada e registrada"})
 }
 
-// (Servidor J1 - Host) Recebe a carta (de S2) do Jogador 2
+// (server 1 - host) o server 2 ta me devolvendo a carta q o j2 jogou
 func (s *Server) handleBattleSubmitMove(c *gin.Context) {
 	var req models.BattleSubmitMoveRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -204,7 +214,7 @@ func (s *Server) handleBattleSubmitMove(c *gin.Context) {
 		return
 	}
 
-	// Encontra a batalha em andamento que este servidor está hospedando
+	// acha a batalha q eu to hospedando
 	s.muBatalhas.RLock()
 	batalha, ok := s.batalhas[req.IdBatalha]
 	s.muBatalhas.RUnlock()
@@ -214,18 +224,18 @@ func (s *Server) handleBattleSubmitMove(c *gin.Context) {
 		return
 	}
 
-	// Envia a carta para a goroutine da batalha (iniciarBatalha)
+	// joga a carta do j2 no canal q a goroutine 'iniciarBatalha' ta esperando
 	select {
 	case batalha.CanalJ2 <- req.Carta:
 		color.Green("BATALHA (Host J1): Recebida carta de J2 para batalha %s", req.IdBatalha)
 		c.JSON(http.StatusOK, gin.H{"message": "Jogada recebida"})
-	case <-time.After(5 * time.Second): // Timeout
+	case <-time.After(5 * time.Second): // timeout
 		color.Red("BATALHA (Host J1): Timeout ao enviar carta de J2 para canal da batalha %s", req.IdBatalha)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Timeout interno"})
 	}
 }
 
-// (Servidor J2) Recebe pedido (de S1) de jogada
+// (server 2) o server 1 (host) ta pedindo a jogada do meu player (j2)
 func (s *Server) handleBattleRequestMove(c *gin.Context) {
 	var req models.BattleRequestMoveRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -233,7 +243,7 @@ func (s *Server) handleBattleRequestMove(c *gin.Context) {
 		return
 	}
 
-	// 1. Descobrir quem é o J2 usando o BattleID
+	// descobre quem eh o meu player (j2) dessa batalha
 	s.muBatalhasPeer.RLock()
 	peerInfo, ok := s.batalhasPeer[req.IdBatalha]
 	s.muBatalhasPeer.RUnlock()
@@ -242,7 +252,7 @@ func (s *Server) handleBattleRequestMove(c *gin.Context) {
 		return
 	}
 
-	// 2. Encontrar a informação de conexão do J2
+	// acha o canal de resposta dele
 	s.muPlayers.RLock()
 	player2Info, ok := s.playerList[peerInfo.PlayerID]
 	s.muPlayers.RUnlock()
@@ -251,7 +261,7 @@ func (s *Server) handleBattleRequestMove(c *gin.Context) {
 		return
 	}
 
-	// 3. Pede a carta ao cliente J2 (via Redis)
+	// manda a msg pro meu cliente (j2) "ei, joga ai" (via redis)
 	resp := models.RespostaPedirCarta{Indice: req.Indice}
 	s.sendToClient(player2Info.ReplyChannel, "Pedir_Carta", resp)
 
@@ -259,7 +269,7 @@ func (s *Server) handleBattleRequestMove(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Pedido de jogada enviado"})
 }
 
-// (Servidor J2) Recebe (de S1) o resultado do turno
+// (server 2) o server 1 (host) ta mandando o resultado do turno
 func (s *Server) handleBattleTurnResult(c *gin.Context) {
 	var req models.BattleTurnResultRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -267,6 +277,7 @@ func (s *Server) handleBattleTurnResult(c *gin.Context) {
 		return
 	}
 
+	// acha meu player (j2)
 	s.muBatalhasPeer.RLock()
 	peerInfo, ok := s.batalhasPeer[req.IdBatalha]
 	s.muBatalhasPeer.RUnlock()
@@ -283,14 +294,14 @@ func (s *Server) handleBattleTurnResult(c *gin.Context) {
 		return
 	}
 
-	// Envia o resultado do turno para o cliente J2 (via Redis)
+	// repassa o resultado pro meu cliente (j2) (via redis)
 	s.sendToClient(player2Info.ReplyChannel, "Turno_Realizado", req.Resultado)
 
 	color.Green("BATALHA (Peer J2): Resultado do turno enviado ao cliente %s", peerInfo.PlayerID)
 	c.JSON(http.StatusOK, gin.H{"message": "Resultado do turno enviado"})
 }
 
-// (Servidor J2) Recebe (de S1) o fim da batalha
+// (server 2) o server 1 (host) ta avisando q a batalha acabou
 func (s *Server) handleBattleEnd(c *gin.Context) {
 	var req models.BattleEndRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -298,11 +309,11 @@ func (s *Server) handleBattleEnd(c *gin.Context) {
 		return
 	}
 
-	// 1. Descobrir quem é o J2 e LIMPAR o mapa
-	s.muBatalhasPeer.Lock() // Usar Lock para poder deletar
+	// acha o j2 e limpa o mapa
+	s.muBatalhasPeer.Lock()
 	peerInfo, ok := s.batalhasPeer[req.IdBatalha]
 	if ok {
-		delete(s.batalhasPeer, req.IdBatalha)
+		delete(s.batalhasPeer, req.IdBatalha) // limpeza!
 	}
 	s.muBatalhasPeer.Unlock()
 
@@ -311,7 +322,7 @@ func (s *Server) handleBattleEnd(c *gin.Context) {
 		return
 	}
 
-	// 2. Encontrar a informação de conexão do J2
+	// acha o canal de resposta do j2
 	s.muPlayers.RLock()
 	player2Info, ok := s.playerList[peerInfo.PlayerID]
 	s.muPlayers.RUnlock()
@@ -321,9 +332,154 @@ func (s *Server) handleBattleEnd(c *gin.Context) {
 		return
 	}
 
-	// 3. Envia o fim da batalha para o cliente J2 (via Redis)
+	// avisa o meu cliente (j2) q acabou (via redis)
 	s.sendToClient(player2Info.ReplyChannel, "Fim_Batalha", req.Resultado)
 
 	color.Green("BATALHA (Peer J2): Fim da batalha enviado ao cliente %s e associação limpa", peerInfo.PlayerID)
 	c.JSON(http.StatusOK, gin.H{"message": "Fim da batalha enviado"})
+}
+
+// handlers de troca (p2p entre servers)
+
+// (server 2) o server 1 (host) ta me avisando q uma troca comecou
+func (s *Server) handleTradeInitiate(c *gin.Context) {
+	var req models.TradeInitiateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Requisição inválida"})
+		return
+	}
+
+	// acha meu player local (j2)
+	s.muPlayers.RLock()
+	player2Info, ok := s.playerList[req.IdJogadorLocal]
+	s.muPlayers.RUnlock()
+
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Jogador local (J2) não encontrado"})
+		return
+	}
+
+	// guarda no mapa 'tradesPeer' pra gnt saber pra qm responder
+	s.muTradesPeer.Lock()
+	s.tradesPeer[req.IdTroca] = peerTradeInfo{
+		PlayerID: req.IdJogadorLocal,
+		HostAPI:  req.HostServidor,
+	}
+	s.muTradesPeer.Unlock()
+
+	// avisa meu cliente (j2) q a troca comecou
+	resp := models.RespostaInicioTroca{
+		Mensagem: req.IdOponente, // id do oponente
+		IdTroca:  req.IdTroca,
+	}
+	s.sendToClient(player2Info.ReplyChannel, "Inicio_Troca", resp)
+
+	color.Magenta("TROCA (Peer J2): Troca %s registrada para jogador %s. Host: %s", req.IdTroca, req.IdJogadorLocal, req.HostServidor)
+	c.JSON(http.StatusOK, gin.H{"message": "Troca iniciada e registrada"})
+}
+
+// (server 1 - host) o server 2 ta me devolvendo a carta q o j2 ofertou
+func (s *Server) handleTradeSubmitCard(c *gin.Context) {
+	var req models.TradeSubmitCardRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Requisição inválida"})
+		return
+	}
+
+	// acha a troca q eu to hospedando
+	s.muTrades.RLock()
+	trade, ok := s.trades[req.IdTroca]
+	s.muTrades.RUnlock()
+
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Troca não encontrada (no Host J1)"})
+		return
+	}
+
+	// joga a carta do j2 no canal q a goroutine 'iniciarTroca' ta esperando
+	select {
+	case trade.CanalJ2 <- req.Carta:
+		color.Magenta("TROCA (Host J1): Recebida carta de J2 para troca %s", req.IdTroca)
+		c.JSON(http.StatusOK, gin.H{"message": "Oferta recebida"})
+	case <-time.After(5 * time.Second): // timeout
+		color.Red("TROCA (Host J1): Timeout ao enviar carta de J2 para canal da troca %s", req.IdTroca)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Timeout interno"})
+	}
+}
+
+// (server 2) o server 1 (host) ta pedindo a oferta do meu player (j2)
+func (s *Server) handleTradeRequestCard(c *gin.Context) {
+	var req models.TradeRequestCardRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Requisição inválida"})
+		return
+	}
+
+	// descobre quem eh o meu player (j2)
+	s.muTradesPeer.RLock()
+	peerInfo, ok := s.tradesPeer[req.IdTroca]
+	s.muTradesPeer.RUnlock()
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Associação de troca não encontrada (J2)"})
+		return
+	}
+
+	// acha o canal de resposta dele
+	s.muPlayers.RLock()
+	player2Info, ok := s.playerList[peerInfo.PlayerID]
+	s.muPlayers.RUnlock()
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Jogador (J2) não encontrado na lista"})
+		return
+	}
+
+	// manda a msg pro meu cliente (j2) "ei, oferta ai" (via redis)
+	resp := models.RespostaPedirCartaTroca{IdTroca: req.IdTroca}
+	s.sendToClient(player2Info.ReplyChannel, "Pedir_Carta_Troca", resp)
+
+	color.Magenta("TROCA (Peer J2): Pedido de carta enviado ao cliente %s", peerInfo.PlayerID)
+	c.JSON(http.StatusOK, gin.H{"message": "Pedido de oferta enviado"})
+}
+
+// (server 2) o server 1 (host) ta mandando o resultado final da troca
+func (s *Server) handleTradeResult(c *gin.Context) {
+	var req models.TradeResultRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Requisição inválida"})
+		return
+	}
+
+	// acha o j2 e limpa o mapa
+	s.muTradesPeer.Lock()
+	peerInfo, ok := s.tradesPeer[req.IdTroca]
+	if ok {
+		delete(s.tradesPeer, req.IdTroca) // limpeza!
+	}
+	s.muTradesPeer.Unlock()
+
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Associação de troca (J2) não encontrada (ou já encerrada)"})
+		return
+	}
+
+	// acha o canal de resposta do j2
+	s.muPlayers.RLock()
+	player2Info, ok := s.playerList[peerInfo.PlayerID]
+	s.muPlayers.RUnlock()
+	if !ok {
+		color.Yellow("TROCA (Peer J2): Fim da troca %s, mas J2 (%s) não encontrado. Associação limpa.", req.IdTroca, peerInfo.PlayerID)
+		c.JSON(http.StatusOK, gin.H{"message": "Fim da troca processado, mas J2 não encontrado"})
+		return
+	}
+
+	// avisa o meu cliente (j2) o resultado (via redis)
+	// a 'CartaRecebida' aqui eh a carta q o j1 ofertou (e q o j2 ta recebendo)
+	resp := models.RespostaResultadoTroca{
+		Mensagem:      "Troca concluída!",
+		CartaRecebida: req.CartaRecebida,
+	}
+	s.sendToClient(player2Info.ReplyChannel, "Resultado_Troca", resp)
+
+	color.Magenta("TROCA (Peer J2): Resultado da troca enviado ao cliente %s e associação limpa", peerInfo.PlayerID)
+	c.JSON(http.StatusOK, gin.H{"message": "Fim da troca enviado"})
 }

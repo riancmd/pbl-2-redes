@@ -1,5 +1,3 @@
-version: "3.8"
-
 networks:
   game-net:
     driver: bridge
@@ -157,7 +155,4 @@ services:
       - REDIS_ADDRS=redis-node-1:6379,redis-node-2:6379,redis-node-3:6379
     stdin_open: true # Mantém STDIN aberto para interação
     tty: true        # Aloca um pseudo-TTY
-    depends_on:      # Garante que os servidores estejam (tentando) subir antes do cliente
-      - server1
-      - server2
-      - server3
+    # Removido depends_on para não criar servidores ao rodar o cliente

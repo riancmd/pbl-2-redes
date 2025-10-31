@@ -1,21 +1,21 @@
 package main
 
 import (
-	"PlanoZ/models"
+	"PlanoZ/models" // certifique-se q o caminho ta certo
 	"fmt"
 	"time"
 
 	"github.com/fatih/color"
 )
 
-// --- Lógica da Batalha (Distribuída) ---
+// logica da batalha (distribuida)
 
-// iniciarBatalha é a goroutine principal que gerencia o estado de uma única batalha.
-// Ela é o "Host" (S1).
+// essa eh a goroutine principal da batalha, ela q manda em tudo
+// (esse server eh o "host" s1)
 func (s *Server) iniciarBatalha(battleID string, b *models.Batalha, canalRespostaJ1 string) {
 	color.Yellow("BATALHA (Host J1): Iniciando loop da batalha %s (%s vs %s)", battleID, b.Jogador1, b.Jogador2)
 
-	// Pegar informações do J2 (necessário para enviar respostas)
+	// pega os dados do j2 pra gnt saber pra qm responder
 	s.muPlayers.RLock()
 	infoJ2, okJ2 := s.playerList[b.Jogador2]
 	s.muPlayers.RUnlock()
@@ -25,41 +25,42 @@ func (s *Server) iniciarBatalha(battleID string, b *models.Batalha, canalRespost
 		return
 	}
 
-	// Envia o início da batalha para J1 (J2 é notificado pelo handleBattleInitiate)
+	// avisa o j1 q comecou (o j2 ja foi avisado pelo handleBattleInitiate)
 	respInicioJ1 := models.RespostaInicioBatalha{
 		Mensagem:  b.Jogador2,
 		IdBatalha: battleID,
 	}
 	s.sendToClient(canalRespostaJ1, "Inicio_Batalha", respInicioJ1)
 
-	time.Sleep(1 * time.Second) // Dar tempo para os clientes carregarem
+	time.Sleep(1 * time.Second) // da um segundinho pros clients respirarem
 
 	turno := 0
 	indice1, indice2 := 0, 0
 	var carta1, carta2 *models.Tanque
 
-	isSelfTest := b.ServidorJ1 == b.ServidorJ2
+	isSelfTest := b.ServidorJ1 == b.ServidorJ2 // checa se eh um teste local (j1 e j2 no msm server)
 
 	for {
-		// Verifica se a goroutine foi instruída a parar (ex: por desconexão)
+		// ve se alguem mandou a gnt parar (tipo o cleanup.go)
 		select {
 		case <-b.CanalEncerra:
 			color.Red("BATALHA %s: Encerrada à força (via CanalEncerra)", battleID)
-			return // encerrarBatalha já foi (ou será) chamado
+			return // encerrarbatalha ja foi chamado ou vai ser
 		default:
 		}
 
-		// --- Obter Carta J1 (Local) ---
+		//  pegar carta do j1 (local)
 		if carta1 == nil {
-			if indice1 >= 5 {
+			if indice1 >= 5 { // 5 cartas por partida
 				s.encerrarBatalha(battleID, b.Jogador2, "J1 sem cartas")
 				return
 			}
-			// 1. Pede a carta ao J1 (via Redis)
+			// pede a carta pro j1 (via redis)
 			s.sendToClient(canalRespostaJ1, "Pedir_Carta", models.RespostaPedirCarta{Indice: indice1})
 
-			// 2. Espera a carta chegar no CanalJ1 (enviada por processReqJogadaBatalha)
-			novaCarta, ok := s.esperarCarta(b.CanalJ1, 20*time.Second) // Timeout de 20s
+			// agora trava aqui e espera o j1 responder no canalj1
+			// (quem bota a carta aqui eh o handlers_redis.go)
+			novaCarta, ok := s.esperarCarta(b.CanalJ1, 20*time.Second) // 20s de timeout, se n responder ja era
 			if !ok {
 				s.encerrarBatalha(battleID, b.Jogador2, "Timeout J1")
 				return
@@ -68,7 +69,7 @@ func (s *Server) iniciarBatalha(battleID string, b *models.Batalha, canalRespost
 			indice1++
 		}
 
-		// --- Obter Carta J2 (Remoto ou Local) ---
+		//  pegar carta do j2 (remoto ou self-test)
 		if carta2 == nil {
 			if indice2 >= 5 {
 				s.encerrarBatalha(battleID, b.Jogador1, "J2 sem cartas")
@@ -76,10 +77,10 @@ func (s *Server) iniciarBatalha(battleID string, b *models.Batalha, canalRespost
 			}
 
 			if isSelfTest {
-				// 1. Pede a carta ao J2 localmente (via Redis)
+				// pede pro j2 localmente (via redis)
 				s.sendToClient(infoJ2.ReplyChannel, "Pedir_Carta", models.RespostaPedirCarta{Indice: indice2})
 			} else {
-				// 1. Pede a carta ao J2 remotamente (via API para S2)
+				// pede pro j2 la no outro server (via api)
 				reqMove := models.BattleRequestMoveRequest{IdBatalha: battleID, Indice: indice2}
 				if err := s.sendToHost(infoJ2.ServerHost, "/battle/request_move", reqMove); err != nil {
 					s.encerrarBatalha(battleID, b.Jogador1, "Falha de rede ao pedir carta J2")
@@ -87,8 +88,9 @@ func (s *Server) iniciarBatalha(battleID string, b *models.Batalha, canalRespost
 				}
 			}
 
-			// 2. Espera a carta chegar no CanalJ2 (enviada por handleBattleSubmitMove)
-			novaCarta, ok := s.esperarCarta(b.CanalJ2, 20*time.Second) // Timeout de 20s
+			// agora espera o j2 responder no canalj2
+			// (quem bota a carta aqui eh o handlers_api.go)
+			novaCarta, ok := s.esperarCarta(b.CanalJ2, 20*time.Second) // 20s de timeout tbm
 			if !ok {
 				s.encerrarBatalha(battleID, b.Jogador1, "Timeout J2")
 				return
@@ -97,23 +99,23 @@ func (s *Server) iniciarBatalha(battleID string, b *models.Batalha, canalRespost
 			indice2++
 		}
 
-		// --- Processar Turno ---
-		var respTurno models.RespostaTurnoRealizado // Cria a struct de resposta específica
-		if turno%2 == 0 {                           // J1 ataca
+		//  processar o turno
+		var respTurno models.RespostaTurnoRealizado // cria a struct de resposta
+		if turno%2 == 0 {                           // turno par, j1 ataca
 			carta2.Vida -= carta1.Ataque
 			respTurno.Mensagem = fmt.Sprintf("Jogador %s (você) jogou no turno %d", b.Jogador1, turno)
-		} else { // J2 ataca
+		} else { // turno impar, j2 ataca
 			carta1.Vida -= carta2.Ataque
 			respTurno.Mensagem = fmt.Sprintf("Jogador %s (oponente) jogou no turno %d", b.Jogador2, turno)
 		}
 
-		// Preenche os outros campos da struct específica
+		// bota as cartas na resposta
 		respTurno.Cartas = []models.Tanque{*carta1, *carta2}
 
-		// Envia a struct específica para J1, envolvida pela genérica
+		// manda pro j1 (o sendtoclient bota o 'tipo' generico)
 		s.sendToClient(canalRespostaJ1, "Turno_Realizado", respTurno)
 
-		// Ajusta a mensagem na *mesma* struct para a perspectiva do J2
+		// ajusta a msg pro ponto de vista do j2
 		if turno%2 == 0 {
 			respTurno.Mensagem = fmt.Sprintf("Jogador %s (oponente) jogou no turno %d", b.Jogador1, turno)
 		} else {
@@ -121,15 +123,15 @@ func (s *Server) iniciarBatalha(battleID string, b *models.Batalha, canalRespost
 		}
 
 		if isSelfTest {
-			// Envia a struct ajustada para J2 local, envolvida pela genérica
+			// envia pro j2 (se for self-test)
 			s.sendToClient(infoJ2.ReplyChannel, "Turno_Realizado", respTurno)
 		} else {
-			// Envia a struct ajustada para J2 remoto, envolvida pela de comunicação REST
+			// envia pro j2 (remoto, via api)
 			reqResult := models.BattleTurnResultRequest{IdBatalha: battleID, Resultado: respTurno}
 			s.sendToHost(infoJ2.ServerHost, "/battle/turn_result", reqResult)
 		}
 
-		// Verificar mortes
+		// ve se alguem morreu
 		if carta1.Vida <= 0 {
 			carta1 = nil
 		}
@@ -142,14 +144,13 @@ func (s *Server) iniciarBatalha(battleID string, b *models.Batalha, canalRespost
 	}
 }
 
-// esperarCarta bloqueia até uma carta chegar no canal ou o timeout estourar.
-// (Esta função e encerrarBatalha continuam no mesmo arquivo battle.go)
+// funcao helper q espera uma carta chegar no canal, ou da timeout
 func (s *Server) esperarCarta(canal chan models.Tanque, tempo time.Duration) (*models.Tanque, bool) {
 	timeout := time.After(tempo)
 	select {
 	case c, ok := <-canal:
 		if !ok {
-			return nil, false // Canal foi fechado
+			return nil, false // canal fechou, deu ruim
 		}
 		return &c, true
 	case <-timeout:
@@ -157,21 +158,20 @@ func (s *Server) esperarCarta(canal chan models.Tanque, tempo time.Duration) (*m
 	}
 }
 
-// encerrarBatalha limpa a batalha do mapa, fecha os canais e notifica os jogadores.
-// (Esta função continua no mesmo arquivo battle.go)
+// funcao central pra limpar a batalha, fechar canais e avisar todo mundo
 func (s *Server) encerrarBatalha(battleID, vencedor, motivo string) {
-	// 1. Remove a batalha do mapa (impede novas jogadas)
+	// tira a batalha do map (impede novas jogadas)
 	s.muBatalhas.Lock()
 	batalha, ok := s.batalhas[battleID]
-	if !ok { // Batalha já encerrada
+	if !ok { // ja foi encerrada, n faz nada
 		s.muBatalhas.Unlock()
 		return
 	}
 	delete(s.batalhas, battleID)
 	s.muBatalhas.Unlock()
 
-	// 2. Fecha os canais (sinaliza para a goroutine parar)
-	// (Usar non-blocking send no CanalEncerra para evitar deadlock se já foi fechado)
+	// fecha os canais pra destravar as goroutines
+	// manda um sinal nao-blocante pra goroutine da batalha parar (se ela ainda tiver la)
 	select {
 	case batalha.CanalEncerra <- true:
 	default:
@@ -182,12 +182,12 @@ func (s *Server) encerrarBatalha(battleID, vencedor, motivo string) {
 
 	color.Yellow("BATALHA %s: Encerrada. Vencedor: %s. Motivo: %s", battleID, vencedor, motivo)
 
-	// 3. Prepara a notificação de Fim de Batalha
+	// prepara a msg de fim de jogo
 	respFim := models.RespostaFimBatalha{
 		Mensagem: fmt.Sprintf("Batalha encerrada! Vencedor: %s (%s).", vencedor, motivo),
 	}
 
-	// 4. Notifica os jogadores
+	// avisa os jogadores
 	s.muPlayers.RLock()
 	infoJ1, okJ1 := s.playerList[batalha.Jogador1]
 	infoJ2, okJ2 := s.playerList[batalha.Jogador2]
@@ -198,12 +198,12 @@ func (s *Server) encerrarBatalha(battleID, vencedor, motivo string) {
 	}
 
 	if okJ2 {
-		if batalha.ServidorJ1 == batalha.ServidorJ2 { // Self-test
+		if batalha.ServidorJ1 == batalha.ServidorJ2 { // self-test, avisa local
 			s.sendToClient(infoJ2.ReplyChannel, "Fim_Batalha", respFim)
 		} else {
-			// Notifica o Servidor J2 para ele notificar o J2
+			// avisa o server 2 (remoto) pra ele avisar o j2 de la
 			reqEnd := models.BattleEndRequest{IdBatalha: battleID, Resultado: respFim}
-			s.sendToHost(infoJ2.ServerHost, "/battle/end", reqEnd) // Ignora erro aqui
+			s.sendToHost(infoJ2.ServerHost, "/battle/end", reqEnd) // se der erro aqui ja era, a batalha acabou msm
 		}
 	}
 }

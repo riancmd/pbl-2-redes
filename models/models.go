@@ -1,10 +1,9 @@
 package models
 
-// #############################################################################
-// # ESTRUTURAS DO JOGO
-// #############################################################################
+// pacote com os modelos principais utilizados ao longo do projeto
 
-// Tanque (Carta do jogo)
+// estruturas do jogo
+// a struct da nossa carta (o tanque)
 type Tanque struct {
 	Modelo     string `json:"modelo"`
 	Id_jogador string `json:"id_jogador"`
@@ -12,55 +11,62 @@ type Tanque struct {
 	Ataque     int    `json:"ataque"`
 }
 
-// Batalha (Armazenada no map 's.batalhas' do servidor Host)
-// Contém os canais de comunicação para a goroutine da batalha.
+// Batalha: isso aqui fica no map s.batalhas la do server
 type Batalha struct {
 	Jogador1     string      `json:"jogador1"`
 	Jogador2     string      `json:"jogador2"`
-	ServidorJ1   string      `json:"servidor_j1"` // Endereço API do Host (ex: "server1:9090")
-	ServidorJ2   string      `json:"servidor_j2"` // Endereço API do Peer (ex: "server2:9091")
-	CanalJ1      chan Tanque `json:"-"`           // Canal para receber a carta do Jogador 1 (local)
-	CanalJ2      chan Tanque `json:"-"`           // Canal para receber a carta do Jogador 2 (remoto)
-	CanalEncerra chan bool   `json:"-"`           // Canal para forçar encerramento
+	ServidorJ1   string      `json:"servidor_j1"` // ex: "server1:9090"
+	ServidorJ2   string      `json:"servidor_j2"` // ex: "server2:9091"
+	CanalJ1      chan Tanque `json:"-"`           // canal pra receber a carta do j1 (q ta no mesmo server)
+	CanalJ2      chan Tanque `json:"-"`           // canal pra receber a carta do j2 (q vem pela api)
+	CanalEncerra chan bool   `json:"-"`           // pra gnt mandar a goroutine da batalha parar
 }
 
-// #############################################################################
-// # ESTRUTURAS DE COMUNICAÇÃO VIA REDIS (Cliente <-> Servidor)
-// #############################################################################
+// Troca: mesma logica da batalha, so q pra troca
+// fica no map s.trades do server
+type Troca struct {
+	Jogador1     string      `json:"jogador1"`
+	Jogador2     string      `json:"jogador2"`
+	ServidorJ1   string      `json:"servidor_j1"`
+	ServidorJ2   string      `json:"servidor_j2"`
+	CanalJ1      chan Tanque `json:"-"` // canal pra receber a carta do j1
+	CanalJ2      chan Tanque `json:"-"` // canal pra receber a carta do j2
+	CanalEncerra chan bool   `json:"-"` // pra forçar o encerramento
+}
 
-// --- Mensagem Genérica (Servidor -> Cliente) ---
-// Toda mensagem recebida pelo cliente em seu canal pessoal terá este formato.
+// comunicacao via redis (cliente <-> servidor)
+
+// msg generica q o servidor manda pro cliente
+// o cliente sempre recebe isso e tem q olhar o 'Tipo' pra saber oq é
 type RespostaGenericaCliente struct {
-	Tipo string      `json:"tipo"` // "Erro", "Conexao_Sucesso", "Sorteio", "Inicio_Batalha", "Fim_Batalha", "Pedir_Carta", "Turno_Realizado"
-	Data interface{} `json:"data"` // Conterá uma das structs de Resposta* abaixo
+	Tipo string      `json:"tipo"` // "Erro", "Conexao_Sucesso", "Sorteio", "Inicio_Batalha", etc
+	Data interface{} `json:"data"` // aqui vai a struct especifica (RespostaConexao, RespostaErro, etc)
 }
 
-// --- Requisições (Cliente -> Servidor) ---
+// reqs do cliente pro servidor
 
-// Para o tópico global: "conectar"
+// qnd o cliente abre o jogo, ele manda isso pro topico 'conectar'
 type ReqConectar struct {
 	IdRemetente   string `json:"id_remetente"`
-	CanalResposta string `json:"canal_resposta"` // Ex: "client_reply:CLIENT_ID_XYZ"
+	CanalResposta string `json:"canal_resposta"` // ex: "client_reply:UUID_DO_CLIENTE"
 }
 
-// Para o tópico global: "comprar_carta"
+// qnd o cliente quer comprar carta, manda isso pro topico 'comprar_carta'
 type ReqComprarCarta struct {
 	IdRemetente   string `json:"id_remetente"`
 	CanalResposta string `json:"canal_resposta"`
 }
 
-// Para o tópico pessoal do SERVIDOR: "servidor_pessoal:SERVER_ID"
-// Usada para parear, enviar mensagem, e iniciar batalha
+// req pro canal pessoal do servidor (parear, msg, iniciar batalha/troca)
 type ReqPessoalServidor struct {
-	Tipo           string `json:"tipo"` // "Parear", "Mensagem", "Batalhar"
+	Tipo           string `json:"tipo"` // "Parear", "Mensagem", "Batalhar", "Trocar"
 	IdRemetente    string `json:"id_remetente"`
 	CanalResposta  string `json:"canal_resposta"`
-	IdDestinatario string `json:"id_destinatario,omitempty"` // Usado por "Parear" e "Mensagem"
-	Mensagem       string `json:"mensagem,omitempty"`        // Usado por "Mensagem"
+	IdDestinatario string `json:"id_destinatario,omitempty"` // pra quem eh
+	Mensagem       string `json:"mensagem,omitempty"`        // se for tipo "Mensagem"
 }
 
-// Para o tópico pessoal do SERVIDOR: "servidor_pessoal:SERVER_ID"
-// Usada para enviar a jogada (carta) durante uma batalha
+// qnd o server pede nossa carta da batalha, a gnt manda isso
 type ReqJogadaBatalha struct {
 	IdRemetente   string `json:"id_remetente"`
 	CanalResposta string `json:"canal_resposta"`
@@ -68,23 +74,31 @@ type ReqJogadaBatalha struct {
 	Carta         Tanque `json:"carta"`
 }
 
-// --- Respostas (Servidor -> Cliente) ---
-// Estas structs serão encapsuladas dentro de RespostaGenericaCliente.Data
+// qnd a gnt oferta uma carta na troca, manda isso
+type ReqCartaTroca struct {
+	IdRemetente   string `json:"id_remetente"`
+	CanalResposta string `json:"canal_resposta"`
+	IdTroca       string `json:"id_troca"`
+	Carta         Tanque `json:"carta"` // a carta q o jogador ta ofertando
+}
+
+// respostas do servidor pro cliente
+// (elas vao dentro do campo 'Data' da RespostaGenericaCliente)
 
 type RespostaErro struct {
 	Erro string `json:"erro"`
 }
 
-// RespostaConexao envia o endereço UDP completo (host:porta)
+// qnd a conexao da certo
 type RespostaConexao struct {
 	Mensagem             string `json:"mensagem"`
 	IdServidorConectado  string `json:"id_servidor_conectado"`
-	CanalPessoalServidor string `json:"canal_pessoal_servidor"` // Ex: "servidor_pessoal:SERVER_ID_123"
-	CanalUDPPing         string `json:"canal_udp_ping"`         // Ex: "server1:8081" (host:porta)
+	CanalPessoalServidor string `json:"canal_pessoal_servidor"` // ex: "servidor_pessoal:server1"
+	CanalUDPPing         string `json:"canal_udp_ping"`         // ex: "server1:8081" (host:porta) pro heartbeat
 }
 
 type RespostaPareamento struct {
-	Mensagem   string `json:"mensagem"` // "Pareamento realizado com JOGADOR_XYZ"
+	Mensagem   string `json:"mensagem"` // "pareamento realizado com..."
 	IdParceiro string `json:"id_parceiro"`
 }
 
@@ -99,30 +113,44 @@ type RespostaSorteio struct {
 }
 
 type RespostaInicioBatalha struct {
-	Mensagem  string `json:"mensagem"` // "Batalha iniciada com JOGADOR_XYZ"
+	Mensagem  string `json:"mensagem"` // "batalha iniciada com..."
 	IdBatalha string `json:"id_batalha"`
 }
 
 type RespostaFimBatalha struct {
-	Mensagem string `json:"mensagem"` // "Batalha finalizada! Vencedor: ..."
+	Mensagem string `json:"mensagem"` // "batalha finalizada! vencedor: ..."
 }
 
 type RespostaPedirCarta struct {
-	Indice int `json:"indice"` // Servidor pede a carta neste índice do deck
+	Indice int `json:"indice"` // server pedindo a carta da batalha (ele fala o *indice* q ele quer)
 }
 
 type RespostaTurnoRealizado struct {
-	Mensagem string   `json:"mensagem"` // "Jogador 1 jogou..."
-	Cartas   []Tanque `json:"cartas"`   // Estado atual das 2 cartas na mesa
+	Mensagem string   `json:"mensagem"` // "jogador 1 jogou..."
+	Cartas   []Tanque `json:"cartas"`   // estado atual das 2 cartas na mesa
 }
 
-// #############################################################################
-// # ESTRUTURAS DE COMUNICAÇÃO VIA REST (Servidor <-> Servidor)
-// #############################################################################
+type RespostaInicioTroca struct {
+	Mensagem string `json:"mensagem"` // "troca iniciada com..."
+	IdTroca  string `json:"id_troca"`
+}
 
-// --- Sincronização de Estado (Líder -> Seguidores) ---
+// server (local ou remoto) avisando q é nossa vez de ofertar na troca
+type RespostaPedirCartaTroca struct {
+	IdTroca string `json:"id_troca"` // so pra gnt saber pra qual troca eh
+}
 
-// Usada pelo Líder para notificar (POST /players/update)
+// o resultado final da troca. se 'CartaRecebida' tiver vazia, falhou
+type RespostaResultadoTroca struct {
+	Mensagem      string `json:"mensagem"`       // "troca realizada com sucesso!"
+	CartaRecebida Tanque `json:"carta_recebida"` // a carta q o jogador recebeu
+}
+
+// comunicacao via rest (servidor <-> servidor)
+
+// sync de estado (lider manda pros seguidores)
+
+// lider avisando q um player entrou ou saiu (POST /players/update)
 type UpdatePlayerListRequest struct {
 	PlayerID      string `json:"player_id"`
 	ServerID      string `json:"server_id"`
@@ -130,63 +158,89 @@ type UpdatePlayerListRequest struct {
 	Acao          string `json:"acao"` // "add" ou "remove"
 }
 
-// Usada pelo Líder para notificar (POST /inventory/update)
+// lider avisando q o estoque de pacotes mudou (POST /inventory/update)
 type UpdateInventoryRequest struct {
 	PacotesRestantes int `json:"pacotes_restantes"`
 }
 
-// --- Requisições para o Líder (Seguidor -> Líder) ---
+// reqs dos seguidores pro lider
 
-// Usada por um seguidor para (POST /players/connect)
+// seguidor avisando o lider q um player novo conectou nele (POST /players/connect)
 type LeaderConnectRequest struct {
 	PlayerID      string `json:"player_id"`
-	ServerID      string `json:"server_id"` // ID do servidor que recebeu a conexão
+	ServerID      string `json:"server_id"` // id do server q recebeu a conexao
 	CanalResposta string `json:"canal_resposta"`
 }
 
-// Usada por um seguidor para (POST /cards/buy)
+// seguidor pedindo pro lider processar uma compra (POST /cards/buy)
 type LeaderBuyCardRequest struct {
-	PlayerID string `json:"player_id"` // ID do jogador que está comprando
-	ServerID string `json:"server_id"` // ID do servidor que atendeu o pedido
+	PlayerID string `json:"player_id"` // id do jogador q ta comprando
+	ServerID string `json:"server_id"` // id do server q atendeu o pedido
 }
 
-// --- Comunicação de Batalha (Servidor_A <-> Servidor_B) ---
+// comunicacao da batalha (s1 <-> s2)
 
-// Servidor Host (J1) -> Servidor Peer (J2) (POST /battle/initiate)
-// Envia o HostServidor (API do S1) para S2 saber para onde responder
+// s1 (host) -> s2 (peer) pra iniciar a batalha (POST /battle/initiate)
+// manda o 'HostServidor' pra s2 saber pra qm responder
 type BattleInitiateRequest struct {
 	IdBatalha      string `json:"id_batalha"`
-	IdJogadorLocal string `json:"id_jogador_local"` // Jogador 2 (que está no Servidor B)
-	IdOponente     string `json:"id_oponente"`      // Jogador 1 (que está no Servidor A)
-	HostServidor   string `json:"host_servidor"`    // Endereço de API do Servidor A (ex: "server1:9090")
+	IdJogadorLocal string `json:"id_jogador_local"` // jogador 2 (q ta no s2)
+	IdOponente     string `json:"id_oponente"`      // jogador 1 (q ta no s1)
+	HostServidor   string `json:"host_servidor"`    // api do s1 (ex: "server1:9090")
 }
 
-// Servidor Host (J1) -> Servidor Peer (J2) (POST /battle/request_move)
+// s1 (host) -> s2 (peer) pra pedir a carta do j2 (POST /battle/request_move)
 type BattleRequestMoveRequest struct {
 	IdBatalha string `json:"id_batalha"`
 	Indice    int    `json:"indice"`
 }
 
-// Servidor Host (J1) -> Servidor Peer (J2) (POST /battle/turn_result)
+// s1 (host) -> s2 (peer) pra mandar o resultado do turno (POST /battle/turn_result)
 type BattleTurnResultRequest struct {
 	IdBatalha string                 `json:"id_batalha"`
 	Resultado RespostaTurnoRealizado `json:"resultado"`
 }
 
-// Servidor Host (J1) -> Servidor Peer (J2) (POST /battle/end)
+// s1 (host) -> s2 (peer) pra avisar q a batalha acabou (POST /battle/end)
 type BattleEndRequest struct {
 	IdBatalha string             `json:"id_batalha"`
 	Resultado RespostaFimBatalha `json:"resultado"`
 }
 
-// Servidor Peer (J2) -> Servidor Host (J1) (POST /battle/submit_move)
-// Envia a carta que J2 jogou de volta para S1
+// s2 (peer) -> s1 (host) pra mandar a carta q o j2 jogou (POST /battle/submit_move)
 type BattleSubmitMoveRequest struct {
 	IdBatalha string `json:"id_batalha"`
 	Carta     Tanque `json:"carta"`
 }
 
-// --- Eleição e Health Check ---
+// comunicacao da troca (s1 <-> s2)
+
+// s1 (host) -> s2 (peer) pra iniciar a troca (POST /trade/initiate)
+type TradeInitiateRequest struct {
+	IdTroca        string `json:"id_troca"`
+	IdJogadorLocal string `json:"id_jogador_local"` // jogador 2
+	IdOponente     string `json:"id_oponente"`      // jogador 1
+	HostServidor   string `json:"host_servidor"`    // api do s1
+}
+
+// s1 (host) -> s2 (peer) pra pedir a carta do j2 (POST /trade/request_card)
+type TradeRequestCardRequest struct {
+	IdTroca string `json:"id_troca"`
+}
+
+// s1 (host) -> s2 (peer) pra mandar o resultado final da troca (POST /trade/result)
+type TradeResultRequest struct {
+	IdTroca       string `json:"id_troca"`
+	CartaRecebida Tanque `json:"carta_recebida"` // a carta q o j1 ofertou (e q o j2 vai receber)
+}
+
+// s2 (peer) -> s1 (host) pra mandar a carta q o j2 ofertou (POST /trade/submit_card)
+type TradeSubmitCardRequest struct {
+	IdTroca string `json:"id_troca"`
+	Carta   Tanque `json:"carta"` // a carta q o j2 ta ofertando
+}
+
+// eleicao e health check
 
 // (GET /health)
 type HealthCheckResponse struct {
